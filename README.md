@@ -1,0 +1,111 @@
+# LIMS – Laboratory Information Management System
+
+## Overview
+
+LIMS is a Laboratory Information Management System developed for a molecular biology research laboratory.
+
+The application manages laboratory inventory, protein production, DNA stock, storage locations and purchase orders while maintaining compatibility with the laboratory's existing Excel workflow.
+
+The project is designed to evolve incrementally from an initial prototype into a scalable and maintainable application.
+
+---
+
+## Main Features
+
+Current and planned modules include:
+
+- Reagent inventory
+- DNA inventory
+- Protein expression
+- Protein purification
+- Aliquot management
+- Storage management
+- Purchase orders
+- User management
+- Inventory history
+- Excel synchronization
+- QR code support (future)
+- Statistics and dashboards (future)
+
+---
+
+## Technology Stack
+
+- Python
+- Streamlit
+- SQLite
+- Pandas
+- Google Drive API
+- Git & GitHub
+
+---
+
+## Project Structure
+
+```
+LIMS/
+
+docs/
+database/
+models/
+repositories/
+services/
+pages/
+ui/
+storage/
+tests/
+
+app.py
+config.py
+requirements.txt
+README.md
+```
+
+---
+
+## Documentation
+
+Project documentation is located in the `docs` folder.
+
+The main documents are:
+
+- Architecture
+- Domain Model
+- Business Rules
+- Data Model
+- Excel Integration
+- Software Architecture
+- Decision Log
+- Roadmap
+
+---
+
+## Development Principles
+
+The project follows these principles:
+
+- Incremental development
+- Clean architecture
+- Separation of responsibilities
+- Reuse existing code whenever possible
+- Avoid unnecessary refactoring
+- Excel compatibility
+- Long-term maintainability
+
+---
+
+## Current Status
+
+Current development stage:
+
+**Version 0.1 – Project Foundation**
+
+The project is currently focused on building the software architecture before implementing laboratory modules.
+
+---
+
+## Author
+
+Developed for the Molecular Biology Laboratory.
+
+Architecture and implementation developed collaboratively using ChatGPT as software architect and development assistant.
