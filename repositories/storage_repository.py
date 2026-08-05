@@ -323,7 +323,34 @@ class StorageRepository:
 
         return cursor.fetchall()
 
+    # =====================================================
+    # RACKS
+    # =====================================================
+def list_racks(self):
 
+    cursor = self.conn.execute(
+        """
+        SELECT
+            id,
+            rack_name,
+            rack_type
+        FROM storage_racks
+        """
+    )
+
+    racks = cursor.fetchall()
+
+    def sort_key(rack):
+
+        name = rack["rack_name"]
+
+        if name.isdigit():
+
+            return (0, int(name))
+
+        return (1, name)
+
+    return sorted(racks, key=sort_key)
     # =====================================================
     # CLEANUP
     # =====================================================
