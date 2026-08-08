@@ -3,7 +3,10 @@ database/schema.py
 
 LIMS Database Schema
 
-Storage Engine v1.0
+Storage Engine v1.1
+- storage_containers now links to a real item (DNA, protein
+  aliquot, or reagent lot) via exclusive FKs instead of a free
+  container_type string.
 """
 
 from sqlite3 import Connection
@@ -30,9 +33,15 @@ def initialize_database() -> None:
     create_storage_racks_table(conn)
     create_storage_boxes_table(conn)
     create_storage_positions_table(conn)
+
+    create_dna_stock_table(conn)
+    create_protein_aliquots_table(conn)
+    create_reagent_lots_table(conn)
+
     create_storage_containers_table(conn)
 
     create_indexes(conn)
+    create_item_link_indexes(conn)
 
     conn.commit()
     conn.close()
@@ -80,7 +89,7 @@ def create_storage_racks_table(conn: Connection) -> None:
 
             FOREIGN KEY(freezer_id)
                 REFERENCES storage_freezers(id)
-                ON DELETE CASCADE,
+                ON DELETE RESTRICT,
 
             UNIQUE(freezer_id, rack_name)
 
@@ -149,6 +158,66 @@ def create_storage_positions_table(conn: Connection) -> None:
     )
 
 
+# ==========================================================
+# ITEM STUB TABLES
+# (flesh out with real columns when each module is built)
+# ==========================================================
+
+def create_dna_stock_table(conn: Connection) -> None:
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS dna_stock (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            name TEXT NOT NULL,
+
+            notes TEXT
+
+        );
+        """
+    )
+
+
+def create_protein_aliquots_table(conn: Connection) -> None:
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS protein_aliquots (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            name TEXT NOT NULL,
+
+            notes TEXT
+
+        );
+        """
+    )
+
+
+def create_reagent_lots_table(conn: Connection) -> None:
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS reagent_lots (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            name TEXT NOT NULL,
+
+            notes TEXT
+
+        );
+        """
+    )
+
+
+# ==========================================================
+# CONTAINERS
+# ==========================================================
+
 def create_storage_containers_table(conn: Connection) -> None:
 
     conn.execute(
@@ -157,9 +226,20 @@ def create_storage_containers_table(conn: Connection) -> None:
 
             id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-            container_type TEXT NOT NULL,
+            container_type TEXT NOT NULL
+                CHECK(
+                    container_type IN (
+                        'DNA',
+                        'PROTEIN_ALIQUOT',
+                        'REAGENT_LOT'
+                    )
+                ),
 
             position_id INTEGER NOT NULL UNIQUE,
+
+            dna_id INTEGER,
+            protein_aliquot_id INTEGER,
+            reagent_lot_id INTEGER,
 
             label TEXT,
 
@@ -173,19 +253,49 @@ def create_storage_containers_table(conn: Connection) -> None:
                     )
                 ),
 
-            created_at TEXT,
-
-            updated_at TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 
             notes TEXT,
 
             FOREIGN KEY(position_id)
                 REFERENCES storage_positions(id)
-                ON DELETE RESTRICT
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(dna_id)
+                REFERENCES dna_stock(id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(protein_aliquot_id)
+                REFERENCES protein_aliquots(id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(reagent_lot_id)
+                REFERENCES reagent_lots(id)
+                ON DELETE RESTRICT,
+
+            CHECK(
+                (
+                    (dna_id IS NOT NULL) +
+                    (protein_aliquot_id IS NOT NULL) +
+                    (reagent_lot_id IS NOT NULL)
+                ) = 1
+            ),
+
+            CHECK(
+                (container_type = 'DNA'
+                    AND dna_id IS NOT NULL) OR
+                (container_type = 'PROTEIN_ALIQUOT'
+                    AND protein_aliquot_id IS NOT NULL) OR
+                (container_type = 'REAGENT_LOT'
+                    AND reagent_lot_id IS NOT NULL)
+            )
 
         );
         """
     )
+
+
 # ==========================================================
 # INDEXES
 # ==========================================================
@@ -211,13 +321,31 @@ def create_indexes(conn: Connection) -> None:
     """)
 
     conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_boxes_owner
+        ON storage_boxes(owner);
+    """)
+
+
+def create_item_link_indexes(conn: Connection) -> None:
+
+    conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_containers_position
         ON storage_containers(position_id);
     """)
 
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_boxes_owner
-        ON storage_boxes(owner);
+        CREATE INDEX IF NOT EXISTS idx_containers_dna
+        ON storage_containers(dna_id);
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_containers_protein
+        ON storage_containers(protein_aliquot_id);
+    """)
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_containers_reagent
+        ON storage_containers(reagent_lot_id);
     """)
 
 
@@ -243,6 +371,9 @@ def recreate_database() -> None:
         "storage_boxes",
         "storage_racks",
         "storage_freezers",
+        "dna_stock",
+        "protein_aliquots",
+        "reagent_lots",
     )
 
     for table in tables:
