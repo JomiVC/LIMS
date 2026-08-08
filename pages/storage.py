@@ -16,6 +16,122 @@ from services.storage_service import StorageService
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
 
+def render_box_grid(box, occupied_positions):
+    """
+    Renderiza la cuadrícula física de una caja.
+
+    EPPENDORF:
+        8 filas x 8 columnas
+
+    FALCON:
+        4 filas x 4 columnas
+    """
+
+    if box.box_type == "EPPENDORF":
+        rows = list("ABCDEFGH")
+        columns = list(range(1, 9))
+
+    elif box.box_type == "FALCON":
+        rows = list("ABCD")
+        columns = list(range(1, 5))
+
+    else:
+        st.warning(
+            f"No se conoce la geometría de la caja "
+            f"'{box.box_name}'."
+        )
+        return
+
+    # ------------------------------------------------------
+    # POSICIONES OCUPADAS
+    # ------------------------------------------------------
+
+    occupied = {}
+
+    for item in occupied_positions:
+        position = item.get("position")
+
+        if position:
+            occupied[position] = item
+
+    # ------------------------------------------------------
+    # CABECERA DE COLUMNAS
+    # ------------------------------------------------------
+
+    header = st.columns(len(columns) + 1)
+
+    with header[0]:
+        st.write("")
+
+    for index, column in enumerate(columns, start=1):
+        with header[index]:
+            st.markdown(
+                f"**{column}**"
+            )
+
+    # ------------------------------------------------------
+    # GRID
+    # ------------------------------------------------------
+
+    for row in rows:
+
+        grid = st.columns(len(columns) + 1)
+
+        # Etiqueta de fila
+        with grid[0]:
+            st.markdown(
+                f"**{row}**"
+            )
+
+        # Celdas
+        for index, column in enumerate(columns, start=1):
+
+            position = f"{row}{column}"
+
+            with grid[index]:
+
+                if position in occupied:
+
+                    item = occupied[position]
+
+                    label = (
+                        item.get("label")
+                        or item.get("sample_name")
+                        or "Ocupada"
+                    )
+
+                    st.button(
+                        f"🔵 {position}",
+                        key=(
+                            f"storage_occupied_"
+                            f"{box.id}_{position}"
+                        ),
+                        help=f"{position} — {label}",
+                        use_container_width=True,
+                        disabled=True,
+                    )
+
+                else:
+
+                    st.button(
+                        f"⚪ {position}",
+                        key=(
+                            f"storage_free_"
+                            f"{box.id}_{position}"
+                        ),
+                        help=f"{position} — Libre",
+                        use_container_width=True,
+                    )
+
+    # ------------------------------------------------------
+    # LEYENDA
+    # ------------------------------------------------------
+
+    st.caption(
+        "⚪ Libre    🔵 Ocupada"
+    )
+
+
 service = StorageService()
 
 st.title("📦 Storage")
@@ -138,6 +254,11 @@ with tab_browse:
                 )
 
                 st.divider()
+
+                render_box_grid(
+                    box,
+                    occupied,
+        )
 
                 edit_tab, delete_tab = st.tabs(["✏️ Editar", "🗑️ Eliminar"])
 
