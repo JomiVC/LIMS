@@ -59,7 +59,7 @@ class StorageService:
             "rack_type": rack.rack_type,
             "has_shelf": False,
             "shelves": [],
-            "slots": [1, 2, 3],
+            "slots": [1, 2, 3, 4, 5],
         }
 
     # =====================================================
