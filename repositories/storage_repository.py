@@ -67,7 +67,6 @@ class StorageRepository:
         """
 
         conn = get_connection()
-        conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON;")
 
         try:
@@ -198,8 +197,17 @@ class StorageRepository:
         rack_id: int,
         shelf: int,
         slot: int,
+        owner: str,
         notes: str
     ) -> None:
+        """
+        Updates location (rack/shelf/slot), owner, and notes.
+
+        Deliberately does NOT allow changing box_name (unique
+        identifier) or box_type (positions were already created
+        based on it -- changing it would desync the position grid
+        from the box's declared type).
+        """
 
         with self._conn() as conn:
 
@@ -215,6 +223,7 @@ class StorageRepository:
                     rack_id = ?,
                     shelf = ?,
                     slot = ?,
+                    owner = ?,
                     notes = ?
                 WHERE id = ?
                 """,
@@ -222,6 +231,7 @@ class StorageRepository:
                     rack_id,
                     shelf,
                     slot,
+                    owner,
                     notes,
                     box_id
                 )
