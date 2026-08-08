@@ -3,7 +3,7 @@ repositories/storage_repository.py
 
 Storage Repository
 
-All SQL queries related to the Storage Engine.
+All database operations related to laboratory storage.
 """
 
 import sqlite3
@@ -16,8 +16,57 @@ class StorageRepository:
     def __init__(self):
 
         self.conn = get_connection()
-
         self.conn.row_factory = sqlite3.Row
+
+    # =====================================================
+    # RACKS
+    # =====================================================
+
+    def list_racks(self):
+
+        cursor = self.conn.execute(
+            """
+            SELECT
+                id,
+                rack_name,
+                rack_type
+            FROM storage_racks
+            """
+        )
+
+        racks = cursor.fetchall()
+
+        numeric = []
+        alpha = []
+
+        for rack in racks:
+
+            if rack["rack_name"].isdigit():
+
+                numeric.append(rack)
+
+            else:
+
+                alpha.append(rack)
+
+        numeric.sort(key=lambda r: int(r["rack_name"]))
+        alpha.sort(key=lambda r: r["rack_name"])
+
+        return numeric + alpha
+
+
+    def get_rack(self, rack_id):
+
+        cursor = self.conn.execute(
+            """
+            SELECT *
+            FROM storage_racks
+            WHERE id = ?
+            """,
+            (rack_id,)
+        )
+
+        return cursor.fetchone()
 
 
     # =====================================================
@@ -26,14 +75,14 @@ class StorageRepository:
 
     def create_box(
         self,
-        box_name: str,
-        box_type: str,
-        owner: str,
-        rack_id: int,
-        shelf: int,
-        slot: int,
-        notes: str = ""
-    ) -> int:
+        box_name,
+        box_type,
+        owner,
+        rack_id,
+        shelf,
+        slot,
+        notes=""
+    ):
 
         cursor = self.conn.execute(
             """
@@ -66,54 +115,38 @@ class StorageRepository:
         return cursor.lastrowid
 
 
-    def get_box(self, box_id: int):
+    def update_box(
+        self,
+        box_id,
+        rack_id,
+        shelf,
+        slot,
+        notes
+    ):
 
-        cursor = self.conn.execute(
+        self.conn.execute(
             """
-            SELECT *
-            FROM storage_boxes
+            UPDATE storage_boxes
+            SET
+                rack_id = ?,
+                shelf = ?,
+                slot = ?,
+                notes = ?
             WHERE id = ?
             """,
-            (box_id,)
+            (
+                rack_id,
+                shelf,
+                slot,
+                notes,
+                box_id
+            )
         )
 
-        return cursor.fetchone()
+        self.conn.commit()
 
 
-    def get_box_by_name(self, name: str):
-
-        cursor = self.conn.execute(
-            """
-            SELECT *
-            FROM storage_boxes
-            WHERE box_name = ?
-            """,
-            (name,)
-        )
-
-        return cursor.fetchone()
-
-
-    def list_boxes(self):
-
-        cursor = self.conn.execute(
-            """
-            SELECT
-                b.*,
-                r.rack_name
-            FROM storage_boxes b
-            JOIN storage_racks r
-                ON b.rack_id = r.id
-            ORDER BY
-                r.rack_name,
-                b.slot
-            """
-        )
-
-        return cursor.fetchall()
-
-
-    def delete_box(self, box_id: int):
+    def delete_box(self, box_id):
 
         self.conn.execute(
             """
@@ -127,12 +160,68 @@ class StorageRepository:
         self.conn.commit()
 
 
+    def get_box(self, box_id):
+
+        cursor = self.conn.execute(
+            """
+            SELECT *
+            FROM storage_boxes
+            WHERE id = ?
+            """,
+            (box_id,)
+        )
+
+        return cursor.fetchone()
+
+
+    def get_box_by_name(self, box_name):
+
+        cursor = self.conn.execute(
+            """
+            SELECT *
+            FROM storage_boxes
+            WHERE box_name = ?
+            """,
+            (box_name,)
+        )
+
+        return cursor.fetchone()
+
+
+    def list_boxes(self):
+
+        cursor = self.conn.execute(
+            """
+            SELECT
+
+                b.id,
+                b.box_name,
+                b.box_type,
+                b.owner,
+                b.shelf,
+                b.slot,
+                b.notes,
+
+                r.rack_name,
+                r.rack_type
+
+            FROM storage_boxes b
+
+            JOIN storage_racks r
+
+                ON b.rack_id = r.id
+            """
+        )
+
+        return cursor.fetchall()
+
+
     def move_box(
         self,
-        box_id: int,
-        rack_id: int,
-        shelf: int,
-        slot: int
+        box_id,
+        rack_id,
+        shelf,
+        slot
     ):
 
         self.conn.execute(
@@ -153,24 +242,27 @@ class StorageRepository:
         )
 
         self.conn.commit()
+    
         # =====================================================
     # POSITIONS
     # =====================================================
 
-    def create_positions(self, box_id: int, box_type: str):
+    def create_positions(
+        self,
+        box_id,
+        box_type
+    ):
 
         positions = []
 
         if box_type.upper() == "EPPENDORF":
 
             rows = "ABCDEFGH"
-
             cols = range(1, 9)
 
         elif box_type.upper() == "FALCON":
 
             rows = "ABCD"
-
             cols = range(1, 5)
 
         else:
@@ -181,12 +273,10 @@ class StorageRepository:
 
             for col in cols:
 
-                position = f"{row}{col}"
-
                 positions.append(
                     (
                         box_id,
-                        position
+                        f"{row}{col}"
                     )
                 )
 
@@ -206,14 +296,31 @@ class StorageRepository:
         self.conn.commit()
 
 
-    def list_positions(self, box_id: int):
+    def list_positions(
+        self,
+        box_id
+    ):
 
         cursor = self.conn.execute(
             """
-            SELECT *
-            FROM storage_positions
-            WHERE box_id = ?
-            ORDER BY position
+            SELECT
+
+                p.id,
+                p.position,
+
+                c.id AS container_id,
+                c.label,
+                c.container_type
+
+            FROM storage_positions p
+
+            LEFT JOIN storage_containers c
+
+                ON p.id = c.position_id
+
+            WHERE p.box_id = ?
+
+            ORDER BY p.position
             """,
             (box_id,)
         )
@@ -221,12 +328,17 @@ class StorageRepository:
         return cursor.fetchall()
 
 
-    def get_position(self, position_id: int):
+    def get_position(
+        self,
+        position_id
+    ):
 
         cursor = self.conn.execute(
             """
             SELECT *
+
             FROM storage_positions
+
             WHERE id = ?
             """,
             (position_id,)
@@ -235,24 +347,113 @@ class StorageRepository:
         return cursor.fetchone()
 
 
-    # =====================================================
+    def get_position_by_name(
+        self,
+        box_id,
+        position
+    ):
+
+        cursor = self.conn.execute(
+            """
+            SELECT *
+
+            FROM storage_positions
+
+            WHERE
+                box_id = ?
+                AND position = ?
+            """,
+            (
+                box_id,
+                position
+            )
+        )
+
+        return cursor.fetchone()
+
+
+    def list_free_positions(
+        self,
+        box_id
+    ):
+
+        cursor = self.conn.execute(
+            """
+            SELECT
+
+                p.id,
+                p.position
+
+            FROM storage_positions p
+
+            LEFT JOIN storage_containers c
+
+                ON p.id = c.position_id
+
+            WHERE
+
+                p.box_id = ?
+
+                AND c.id IS NULL
+
+            ORDER BY p.position
+            """,
+            (box_id,)
+        )
+
+        return cursor.fetchall()
+
+
+    def list_occupied_positions(
+        self,
+        box_id
+    ):
+
+        cursor = self.conn.execute(
+            """
+            SELECT
+
+                p.position,
+
+                c.id,
+                c.label,
+                c.container_type
+
+            FROM storage_positions p
+
+            JOIN storage_containers c
+
+                ON p.id = c.position_id
+
+            WHERE
+
+                p.box_id = ?
+
+            ORDER BY p.position
+            """,
+            (box_id,)
+        )
+
+        return cursor.fetchall()
+
+        # =====================================================
     # CONTAINERS
     # =====================================================
 
-    def assign_container(
+    def create_container(
         self,
-        position_id: int,
-        container_type: str,
-        label: str,
-        notes: str = ""
-    ) -> int:
+        position_id,
+        container_type,
+        label,
+        notes=""
+    ):
 
         cursor = self.conn.execute(
             """
             INSERT INTO storage_containers
             (
-                container_type,
                 position_id,
+                container_type,
                 label,
                 notes,
                 created_at,
@@ -266,8 +467,8 @@ class StorageRepository:
             )
             """,
             (
-                container_type,
                 position_id,
+                container_type,
                 label,
                 notes
             )
@@ -278,12 +479,46 @@ class StorageRepository:
         return cursor.lastrowid
 
 
-    def remove_container(self, container_id: int):
+    def get_container(self, container_id):
+
+        cursor = self.conn.execute(
+            """
+            SELECT *
+
+            FROM storage_containers
+
+            WHERE id = ?
+            """,
+            (container_id,)
+        )
+
+        return cursor.fetchone()
+
+
+    def get_container_by_label(self, label):
+
+        cursor = self.conn.execute(
+            """
+            SELECT *
+
+            FROM storage_containers
+
+            WHERE label = ?
+            """,
+            (label,)
+        )
+
+        return cursor.fetchone()
+
+
+    def delete_container(self, container_id):
 
         self.conn.execute(
             """
             DELETE
+
             FROM storage_containers
+
             WHERE id = ?
             """,
             (container_id,)
@@ -292,68 +527,63 @@ class StorageRepository:
         self.conn.commit()
 
 
-    def search_container(self, label: str):
+    def search_containers(self, text):
 
         cursor = self.conn.execute(
             """
             SELECT
+
                 c.id,
                 c.label,
                 c.container_type,
+
                 p.position,
+
                 b.box_name,
+
                 r.rack_name
+
             FROM storage_containers c
 
             JOIN storage_positions p
+
                 ON c.position_id = p.id
 
             JOIN storage_boxes b
+
                 ON p.box_id = b.id
 
             JOIN storage_racks r
+
                 ON b.rack_id = r.id
 
-            WHERE c.label LIKE ?
+            WHERE
 
-            ORDER BY c.label
+                c.label LIKE ?
+
+            ORDER BY
+
+                c.label
             """,
-            (f"%{label}%",)
+            (f"%{text}%",)
         )
 
         return cursor.fetchall()
 
+
     # =====================================================
-    # RACKS
+    # DATABASE
     # =====================================================
-def list_racks(self):
 
-    cursor = self.conn.execute(
-        """
-        SELECT
-            id,
-            rack_name,
-            rack_type
-        FROM storage_racks
-        """
-    )
+    def commit(self):
 
-    racks = cursor.fetchall()
+        self.conn.commit()
 
-    def sort_key(rack):
 
-        name = rack["rack_name"]
+    def rollback(self):
 
-        if name.isdigit():
+        self.conn.rollback()
 
-            return (0, int(name))
-
-        return (1, name)
-
-    return sorted(racks, key=sort_key)
-    # =====================================================
-    # CLEANUP
-    # =====================================================
 
     def close(self):
 

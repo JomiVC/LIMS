@@ -46,20 +46,22 @@ with st.form("create_box"):
     selected_rack_name = selected_rack.split(" ")[0]
 
     falcon_rack = selected_rack_name in ["A", "B", "C", "D"]
-    shelf = st.number_input(
+    
+    if falcon_rack:
+
+    shelf = st.selectbox(
         "Shelf",
-        min_value=1,
-        max_value=10,
-        value=1
+        ["Upper", "Lower"]
     )
 
-    slot = st.number_input(
-        "Slot",
-        min_value=1,
-        max_value=10,
-        value=1
-    )
+    else:
 
+    shelf = None
+
+    slot = st.selectbox(
+    "Slot",
+    [1, 2, 3, 4, 5]
+    )
     notes = st.text_area("Notes")
 
     submitted = st.form_submit_button("Create box")
