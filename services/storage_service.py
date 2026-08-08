@@ -50,7 +50,7 @@ class StorageService:
                 "rack_type": rack.rack_type,
                 "has_shelf": True,
                 "shelves": ["Upper", "Lower"],
-                "slots": [1, 2, 3, 4, 5],
+                "slots": [1, 2, 3],
             }
 
         return {
@@ -59,7 +59,7 @@ class StorageService:
             "rack_type": rack.rack_type,
             "has_shelf": False,
             "shelves": [],
-            "slots": [1, 2, 3, 4, 5],
+            "slots": [1, 2, 3],
         }
 
     # =====================================================
@@ -258,4 +258,3 @@ class StorageService:
 
         self.repository.delete_container(container_id)
 
-        
