@@ -16,15 +16,18 @@ from services.storage_service import StorageService
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
 
+
 def render_box_grid(box, occupied_positions):
     """
-    Renderiza la cuadrícula física de una caja.
+    Renders the physical grid of a box.
 
-    EPPENDORF:
-        8 filas x 8 columnas
+    EPPENDORF: 8 rows x 8 columns
+    FALCON:    4 rows x 4 columns
 
-    FALCON:
-        4 filas x 4 columnas
+    Free/occupied buttons currently have no on_click handler --
+    they're a visual reference for now. This is a natural hook for
+    the upcoming Containers UI: clicking a free (⚪) position could
+    open the "assign item to this position" form directly.
     """
 
     if box.box_type == "EPPENDORF":
@@ -36,14 +39,11 @@ def render_box_grid(box, occupied_positions):
         columns = list(range(1, 5))
 
     else:
-        st.warning(
-            f"No se conoce la geometría de la caja "
-            f"'{box.box_name}'."
-        )
+        st.warning(f"Unknown geometry for box '{box.box_name}'.")
         return
 
     # ------------------------------------------------------
-    # POSICIONES OCUPADAS
+    # OCCUPIED POSITIONS
     # ------------------------------------------------------
 
     occupied = {}
@@ -55,7 +55,7 @@ def render_box_grid(box, occupied_positions):
             occupied[position] = item
 
     # ------------------------------------------------------
-    # CABECERA DE COLUMNAS
+    # COLUMN HEADER
     # ------------------------------------------------------
 
     header = st.columns(len(columns) + 1)
@@ -65,9 +65,7 @@ def render_box_grid(box, occupied_positions):
 
     for index, column in enumerate(columns, start=1):
         with header[index]:
-            st.markdown(
-                f"**{column}**"
-            )
+            st.markdown(f"**{column}**")
 
     # ------------------------------------------------------
     # GRID
@@ -77,13 +75,11 @@ def render_box_grid(box, occupied_positions):
 
         grid = st.columns(len(columns) + 1)
 
-        # Etiqueta de fila
+        # Row label
         with grid[0]:
-            st.markdown(
-                f"**{row}**"
-            )
+            st.markdown(f"**{row}**")
 
-        # Celdas
+        # Cells
         for index, column in enumerate(columns, start=1):
 
             position = f"{row}{column}"
@@ -93,19 +89,11 @@ def render_box_grid(box, occupied_positions):
                 if position in occupied:
 
                     item = occupied[position]
-
-                    label = (
-                        item.get("label")
-                        or item.get("sample_name")
-                        or "Ocupada"
-                    )
+                    label = item.get("label") or "Occupied"
 
                     st.button(
                         f"🔵 {position}",
-                        key=(
-                            f"storage_occupied_"
-                            f"{box.id}_{position}"
-                        ),
+                        key=f"storage_occupied_{box.id}_{position}",
                         help=f"{position} — {label}",
                         use_container_width=True,
                         disabled=True,
@@ -115,32 +103,27 @@ def render_box_grid(box, occupied_positions):
 
                     st.button(
                         f"⚪ {position}",
-                        key=(
-                            f"storage_free_"
-                            f"{box.id}_{position}"
-                        ),
-                        help=f"{position} — Libre",
+                        key=f"storage_free_{box.id}_{position}",
+                        help=f"{position} — Free",
                         use_container_width=True,
                     )
 
     # ------------------------------------------------------
-    # LEYENDA
+    # LEGEND
     # ------------------------------------------------------
 
-    st.caption(
-        "⚪ Libre    🔵 Ocupada"
-    )
+    st.caption("⚪ Free    🔵 Occupied")
 
 
 service = StorageService()
 
 st.title("📦 Storage")
 
-tab_new, tab_browse = st.tabs(["Registrar caja", "Ver cajas"])
+tab_new, tab_browse = st.tabs(["Register box", "Browse boxes"])
 
 
 # ==========================================================
-# TAB: REGISTRAR CAJA
+# TAB: REGISTER BOX
 # ==========================================================
 
 with tab_new:
@@ -149,8 +132,8 @@ with tab_new:
 
     if not racks:
         st.warning(
-            "No hay racks creados todavía. Crea un rack antes de "
-            "registrar una caja."
+            "No racks created yet. Create a rack before "
+            "registering a box."
         )
 
     else:
@@ -171,10 +154,10 @@ with tab_new:
 
         with st.form("create_box_form", clear_on_submit=True):
 
-            box_name = st.text_input("Nombre de la caja")
+            box_name = st.text_input("Box name")
 
             box_type = st.selectbox(
-                "Tipo de caja",
+                "Box type",
                 options=["EPPENDORF", "FALCON"],
             )
 
@@ -182,15 +165,15 @@ with tab_new:
                 shelf = st.selectbox("Shelf", options=config["shelves"])
             else:
                 shelf = None
-                st.caption("Este rack no tiene shelves.")
+                st.caption("This rack has no shelves.")
 
             slot = st.selectbox("Slot", options=config["slots"])
 
-            owner = st.text_input("Propietario")
+            owner = st.text_input("Owner")
 
-            notes = st.text_area("Notas", value="")
+            notes = st.text_area("Notes", value="")
 
-            submitted = st.form_submit_button("Guardar")
+            submitted = st.form_submit_button("Save")
 
             if submitted:
 
@@ -212,13 +195,13 @@ with tab_new:
                     positions = service.list_positions(box_id)
 
                     st.success(
-                        f"Caja '{box_name}' creada (id={box_id}) con "
-                        f"{len(positions)} posiciones."
+                        f"Box '{box_name}' created (id={box_id}) with "
+                        f"{len(positions)} positions."
                     )
 
 
 # ==========================================================
-# TAB: VER CAJAS
+# TAB: BROWSE BOXES
 # ==========================================================
 
 with tab_browse:
@@ -228,41 +211,40 @@ with tab_browse:
     rack_options_browse = {rack.id: rack.rack_name for rack in all_racks}
 
     if not boxes:
-        st.info("No hay cajas registradas todavía.")
+        st.info("No boxes registered yet.")
 
     else:
         for box in boxes:
 
-            rack_name = rack_options_browse.get(box.rack_id, "rack desconocido")
+            rack_name = rack_options_browse.get(box.rack_id, "unknown rack")
 
             with st.expander(
                 f"{box.box_name} ({box.box_type}) — {rack_name} — "
-                f"{box.owner or 'sin dueño'}"
+                f"{box.owner or 'no owner'}"
             ):
 
                 st.write(f"**Slot:** {box.shelf or '—'} / {box.slot}")
 
                 if box.notes:
-                    st.write(f"**Notas:** {box.notes}")
+                    st.write(f"**Notes:** {box.notes}")
 
                 free = service.list_free_positions(box.id)
                 occupied = service.list_occupied_positions(box.id)
 
                 st.write(
-                    f"**Posiciones:** {len(occupied)} ocupadas, "
-                    f"{len(free)} libres"
+                    f"**Positions:** {len(occupied)} occupied, "
+                    f"{len(free)} free"
                 )
 
                 st.divider()
 
-                render_box_grid(
-                    box,
-                    occupied,
-        )
+                render_box_grid(box, occupied)
 
-                edit_tab, delete_tab = st.tabs(["✏️ Editar", "🗑️ Eliminar"])
+                st.divider()
 
-                # --- EDITAR ---
+                edit_tab, delete_tab = st.tabs(["✏️ Edit", "🗑️ Delete"])
+
+                # --- EDIT ---
                 with edit_tab:
 
                     with st.form(f"edit_box_{box.id}"):
@@ -305,18 +287,18 @@ with tab_browse:
                         )
 
                         new_owner = st.text_input(
-                            "Propietario",
+                            "Owner",
                             value=box.owner or "",
                             key=f"edit_owner_{box.id}",
                         )
 
                         new_notes = st.text_area(
-                            "Notas",
+                            "Notes",
                             value=box.notes or "",
                             key=f"edit_notes_{box.id}",
                         )
 
-                        save = st.form_submit_button("Guardar cambios")
+                        save = st.form_submit_button("Save changes")
 
                         if save:
                             try:
@@ -331,24 +313,24 @@ with tab_browse:
                             except ValueError as e:
                                 st.error(str(e))
                             else:
-                                st.success("Caja actualizada.")
+                                st.success("Box updated.")
                                 st.rerun()
 
-                # --- ELIMINAR ---
+                # --- DELETE ---
                 with delete_tab:
 
                     st.warning(
-                        "Solo se puede eliminar una caja si todas "
-                        "sus posiciones están libres."
+                        "A box can only be deleted if all of its "
+                        "positions are free."
                     )
 
                     confirm = st.checkbox(
-                        f"Confirmo que quiero eliminar '{box.box_name}'",
+                        f"I confirm I want to delete '{box.box_name}'",
                         key=f"confirm_delete_{box.id}",
                     )
 
                     if st.button(
-                        "Eliminar caja",
+                        "Delete box",
                         key=f"delete_{box.id}",
                         disabled=not confirm,
                     ):
@@ -357,5 +339,5 @@ with tab_browse:
                         except ValueError as e:
                             st.error(str(e))
                         else:
-                            st.success(f"Caja '{box.box_name}' eliminada.")
+                            st.success(f"Box '{box.box_name}' deleted.")
                             st.rerun()
