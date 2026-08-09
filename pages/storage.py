@@ -1,18 +1,21 @@
 """
 pages/storage.py
 
-Storage module -- everything related to the physical storage
-hierarchy (freezers, racks, boxes) and assigning items to
-positions.
+Storage module.
 
 Structure:
-    Register new storage
-        - Register box
-        - Register rack
-        - Register freezer
+    Samples
+        - Search
     Boxes
-        - Browse boxes
-        - Assign item
+        - Browse
+        - Assign item (interim -- will move into each producing
+          module's registration flow, e.g. Proteins/DNA/E.Coli,
+          once those exist; kept here for now so the assignment
+          feature stays testable)
+    New equipment
+        - Create Box
+        - Create Rack
+        - Create Freezer
 """
 
 import streamlit as st
@@ -29,247 +32,86 @@ item_service = ItemService()
 
 st.title("📦 Storage")
 
-top_register, top_boxes = st.tabs(["Register new storage", "Boxes"])
+tab_samples, tab_boxes, tab_new_equipment = st.tabs(
+    ["Samples", "Boxes", "New equipment"]
+)
 
 
 # ==========================================================
-# TOP TAB: REGISTER NEW STORAGE
+# SAMPLES
 # ==========================================================
 
-with top_register:
+with tab_samples:
 
-    reg_box_tab, reg_rack_tab, reg_freezer_tab = st.tabs(
-        ["Register box", "Register rack", "Register freezer"]
+    st.subheader("Search")
+
+    query = st.text_input(
+        "Search by sample name",
+        key="samples_search_query",
     )
 
-    # ------------------------------------------------------
-    # REGISTER BOX
-    # ------------------------------------------------------
+    if query:
 
-    with reg_box_tab:
+        query_lower = query.strip().lower()
+        results = []
 
-        racks = storage_service.list_racks()
+        for container_type in CONTAINER_TYPE_LABELS:
 
-        if not racks:
-            st.warning(
-                "No racks created yet. Create a rack before "
-                "registering a box."
-            )
+            for row in item_service.list_items(container_type):
 
-        else:
-            rack_options = {rack.id: rack.rack_name for rack in racks}
+                if query_lower in row["name"].lower():
+                    results.append((container_type, row))
 
-            selected_rack_id = st.selectbox(
-                "Rack",
-                options=list(rack_options.keys()),
-                format_func=lambda rid: rack_options[rid],
-                key="reg_box_rack_select",
-            )
-
-            # Config depends on the selected rack, so it's read
-            # outside the form to update shelf/slot options live.
-            config = storage_service.get_rack_configuration(
-                selected_rack_id
-            )
-
-            with st.form("create_box_form", clear_on_submit=True):
-
-                box_name = st.text_input("Box name")
-
-                box_type = st.selectbox(
-                    "Box type",
-                    options=["EPPENDORF", "FALCON", "FALCON_15"],
-                )
-
-                if config["has_shelf"]:
-                    shelf = st.selectbox(
-                        "Shelf", options=config["shelves"]
-                    )
-                else:
-                    shelf = None
-                    st.caption("This rack has no shelves.")
-
-                slot = st.selectbox("Slot", options=config["slots"])
-
-                owner = st.text_input("Owner")
-
-                notes = st.text_area("Notes", value="")
-
-                submitted = st.form_submit_button("Save")
-
-                if submitted:
-
-                    try:
-                        box_id = storage_service.create_box(
-                            box_name=box_name,
-                            box_type=box_type,
-                            owner=owner,
-                            rack_id=selected_rack_id,
-                            shelf=shelf,
-                            slot=slot,
-                            notes=notes,
-                        )
-
-                    except ValueError as e:
-                        st.error(str(e))
-
-                    else:
-                        positions = storage_service.list_positions(
-                            box_id
-                        )
-
-                        st.success(
-                            f"Box '{box_name}' created (id={box_id}) "
-                            f"with {len(positions)} positions."
-                        )
-
-    # ------------------------------------------------------
-    # REGISTER RACK
-    # ------------------------------------------------------
-
-    with reg_rack_tab:
-
-        freezers = storage_service.list_freezers()
-
-        if not freezers:
-            st.warning(
-                "No freezers registered yet. Create one in "
-                "'Register freezer' first."
-            )
+        if not results:
+            st.info("No matching samples found.")
 
         else:
-            freezer_options = {f.id: f.name for f in freezers}
+            for container_type, row in results:
 
-            with st.form("create_rack_form", clear_on_submit=True):
-
-                rack_freezer_id = st.selectbox(
-                    "Freezer",
-                    options=list(freezer_options.keys()),
-                    format_func=lambda fid: freezer_options[fid],
-                    key="reg_rack_freezer_select",
+                location = storage_service.get_container_for_item(
+                    container_type, row["id"]
                 )
 
-                rack_name = st.text_input("Rack name")
-
-                rack_type = st.selectbox(
-                    "Rack type", options=["EPPENDORF", "FALCON"]
+                location_text = (
+                    f"{location['rack_name']} / {location['box_name']} "
+                    f"/ {location['position']}"
+                    if location
+                    else "Not yet assigned to a location"
                 )
 
-                has_shelf = st.checkbox("Has shelves (Upper / Lower)")
-
-                slot_count = st.number_input(
-                    "Number of slots", min_value=1, value=5, step=1
+                st.markdown(
+                    f"**{row['name']}** "
+                    f"({CONTAINER_TYPE_LABELS[container_type]})"
                 )
+                st.caption(location_text)
 
-                rack_notes = st.text_area("Description", value="")
+                if row["notes"]:
+                    st.caption(f"Notes: {row['notes']}")
 
-                if st.form_submit_button("Save"):
+                st.divider()
 
-                    try:
-                        storage_service.create_rack(
-                            freezer_id=rack_freezer_id,
-                            rack_name=rack_name,
-                            rack_type=rack_type,
-                            has_shelf=has_shelf,
-                            slot_count=int(slot_count),
-                            description=rack_notes,
-                        )
-                    except ValueError as e:
-                        st.error(str(e))
-                    else:
-                        st.success(f"Rack '{rack_name}' created.")
-                        st.rerun()
-
-            st.divider()
-            st.subheader("Existing racks")
-
-            racks = storage_service.list_racks()
-
-            if not racks:
-                st.info("No racks registered yet.")
-
-            else:
-                for freezer in freezers:
-
-                    freezer_racks = [
-                        r for r in racks if r.freezer_id == freezer.id
-                    ]
-
-                    if not freezer_racks:
-                        continue
-
-                    st.markdown(f"**{freezer.name}**")
-
-                    for rack in freezer_racks:
-                        shelf_info = (
-                            "with shelves"
-                            if rack.has_shelf
-                            else "no shelves"
-                        )
-                        st.caption(
-                            f"{rack.rack_name} — {rack.rack_type} — "
-                            f"{shelf_info} — {rack.slot_count} slots"
-                        )
-
-    # ------------------------------------------------------
-    # REGISTER FREEZER
-    # ------------------------------------------------------
-
-    with reg_freezer_tab:
-
-        with st.form("create_freezer_form", clear_on_submit=True):
-
-            freezer_name = st.text_input("Name")
-
-            freezer_temp = st.selectbox(
-                "Temperature (°C)",
-                options=[-20, -80],
-                key="reg_freezer_temp_select",
-            )
-
-            freezer_notes = st.text_area("Description", value="")
-
-            if st.form_submit_button("Save"):
-
-                try:
-                    storage_service.create_freezer(
-                        name=freezer_name,
-                        temperature=freezer_temp,
-                        description=freezer_notes,
-                    )
-                except ValueError as e:
-                    st.error(str(e))
-                else:
-                    st.success(f"Freezer '{freezer_name}' created.")
-                    st.rerun()
-
-        st.divider()
-        st.subheader("Existing freezers")
-
-        freezers = storage_service.list_freezers()
-
-        if not freezers:
-            st.info("No freezers registered yet.")
-
-        else:
-            for freezer in freezers:
-                with st.expander(
-                    f"{freezer.name} ({freezer.temperature}°C)"
-                ):
-                    if freezer.description:
-                        st.write(freezer.description)
+    else:
+        st.caption(
+            "Type a name to search across DNA, protein aliquots, "
+            "and reagent lots."
+        )
+        st.caption(
+            "File attachments and full location grids will be "
+            "added once the producing modules (Proteins, DNA, "
+            "E.Coli strains) exist."
+        )
 
 
 # ==========================================================
-# TOP TAB: BOXES
+# BOXES
 # ==========================================================
 
-with top_boxes:
+with tab_boxes:
 
-    browse_tab, assign_tab = st.tabs(["Browse boxes", "Assign item"])
+    browse_tab, assign_tab = st.tabs(["Browse", "Assign item"])
 
     # ------------------------------------------------------
-    # BROWSE BOXES
+    # BROWSE
     # ------------------------------------------------------
 
     with browse_tab:
@@ -435,7 +277,7 @@ with top_boxes:
                                 st.rerun()
 
     # ------------------------------------------------------
-    # ASSIGN ITEM
+    # ASSIGN ITEM (interim)
     # ------------------------------------------------------
 
     with assign_tab:
@@ -445,7 +287,7 @@ with top_boxes:
         if not boxes:
             st.warning(
                 "No boxes registered yet. Register one in "
-                "'Register new storage' first."
+                "'New equipment' first."
             )
 
         else:
@@ -470,8 +312,6 @@ with top_boxes:
                 key_prefix="assign",
             )
 
-            # Persist the clicked position across reruns (the form
-            # below causes its own reruns on submit).
             if clicked_position:
                 st.session_state["assign_selected_position"] = (
                     clicked_position
@@ -576,3 +416,229 @@ with top_boxes:
                                         "assign_selected_position"
                                     ]
                                     st.rerun()
+
+
+# ==========================================================
+# NEW EQUIPMENT
+# ==========================================================
+
+with tab_new_equipment:
+
+    create_box_tab, create_rack_tab, create_freezer_tab = st.tabs(
+        ["Create Box", "Create Rack", "Create Freezer"]
+    )
+
+    # ------------------------------------------------------
+    # CREATE BOX
+    # ------------------------------------------------------
+
+    with create_box_tab:
+
+        racks = storage_service.list_racks()
+
+        if not racks:
+            st.warning(
+                "No racks created yet. Create a rack before "
+                "registering a box."
+            )
+
+        else:
+            rack_options = {rack.id: rack.rack_name for rack in racks}
+
+            selected_rack_id = st.selectbox(
+                "Rack",
+                options=list(rack_options.keys()),
+                format_func=lambda rid: rack_options[rid],
+                key="create_box_rack_select",
+            )
+
+            config = storage_service.get_rack_configuration(
+                selected_rack_id
+            )
+
+            with st.form("create_box_form", clear_on_submit=True):
+
+                box_name = st.text_input("Box name")
+
+                box_type = st.selectbox(
+                    "Box type",
+                    options=["EPPENDORF", "FALCON", "FALCON_15"],
+                )
+
+                if config["has_shelf"]:
+                    shelf = st.selectbox(
+                        "Shelf", options=config["shelves"]
+                    )
+                else:
+                    shelf = None
+                    st.caption("This rack has no shelves.")
+
+                slot = st.selectbox("Slot", options=config["slots"])
+
+                owner = st.text_input("Owner")
+
+                notes = st.text_area("Notes", value="")
+
+                submitted = st.form_submit_button("Save")
+
+                if submitted:
+
+                    try:
+                        box_id = storage_service.create_box(
+                            box_name=box_name,
+                            box_type=box_type,
+                            owner=owner,
+                            rack_id=selected_rack_id,
+                            shelf=shelf,
+                            slot=slot,
+                            notes=notes,
+                        )
+
+                    except ValueError as e:
+                        st.error(str(e))
+
+                    else:
+                        positions = storage_service.list_positions(
+                            box_id
+                        )
+
+                        st.success(
+                            f"Box '{box_name}' created (id={box_id}) "
+                            f"with {len(positions)} positions."
+                        )
+
+    # ------------------------------------------------------
+    # CREATE RACK
+    # ------------------------------------------------------
+
+    with create_rack_tab:
+
+        freezers = storage_service.list_freezers()
+
+        if not freezers:
+            st.warning(
+                "No freezers registered yet. Create one in "
+                "'Create Freezer' first."
+            )
+
+        else:
+            freezer_options = {f.id: f.name for f in freezers}
+
+            with st.form("create_rack_form", clear_on_submit=True):
+
+                rack_freezer_id = st.selectbox(
+                    "Freezer",
+                    options=list(freezer_options.keys()),
+                    format_func=lambda fid: freezer_options[fid],
+                    key="create_rack_freezer_select",
+                )
+
+                rack_name = st.text_input("Rack name")
+
+                rack_type = st.selectbox(
+                    "Rack type", options=["EPPENDORF", "FALCON"]
+                )
+
+                has_shelf = st.checkbox("Has shelves (Upper / Lower)")
+
+                slot_count = st.number_input(
+                    "Number of slots", min_value=1, value=5, step=1
+                )
+
+                rack_notes = st.text_area("Description", value="")
+
+                if st.form_submit_button("Save"):
+
+                    try:
+                        storage_service.create_rack(
+                            freezer_id=rack_freezer_id,
+                            rack_name=rack_name,
+                            rack_type=rack_type,
+                            has_shelf=has_shelf,
+                            slot_count=int(slot_count),
+                            description=rack_notes,
+                        )
+                    except ValueError as e:
+                        st.error(str(e))
+                    else:
+                        st.success(f"Rack '{rack_name}' created.")
+                        st.rerun()
+
+            st.divider()
+            st.subheader("Existing racks")
+
+            racks = storage_service.list_racks()
+
+            if not racks:
+                st.info("No racks registered yet.")
+
+            else:
+                for freezer in freezers:
+
+                    freezer_racks = [
+                        r for r in racks if r.freezer_id == freezer.id
+                    ]
+
+                    if not freezer_racks:
+                        continue
+
+                    st.markdown(f"**{freezer.name}**")
+
+                    for rack in freezer_racks:
+                        shelf_info = (
+                            "with shelves"
+                            if rack.has_shelf
+                            else "no shelves"
+                        )
+                        st.caption(
+                            f"{rack.rack_name} — {rack.rack_type} — "
+                            f"{shelf_info} — {rack.slot_count} slots"
+                        )
+
+    # ------------------------------------------------------
+    # CREATE FREEZER
+    # ------------------------------------------------------
+
+    with create_freezer_tab:
+
+        with st.form("create_freezer_form", clear_on_submit=True):
+
+            freezer_name = st.text_input("Name")
+
+            freezer_temp = st.selectbox(
+                "Temperature (°C)",
+                options=[-20, -80],
+                key="create_freezer_temp_select",
+            )
+
+            freezer_notes = st.text_area("Description", value="")
+
+            if st.form_submit_button("Save"):
+
+                try:
+                    storage_service.create_freezer(
+                        name=freezer_name,
+                        temperature=freezer_temp,
+                        description=freezer_notes,
+                    )
+                except ValueError as e:
+                    st.error(str(e))
+                else:
+                    st.success(f"Freezer '{freezer_name}' created.")
+                    st.rerun()
+
+        st.divider()
+        st.subheader("Existing freezers")
+
+        freezers = storage_service.list_freezers()
+
+        if not freezers:
+            st.info("No freezers registered yet.")
+
+        else:
+            for freezer in freezers:
+                with st.expander(
+                    f"{freezer.name} ({freezer.temperature}°C)"
+                ):
+                    if freezer.description:
+                        st.write(freezer.description)

@@ -316,6 +316,11 @@ class StorageService:
 
         return container
 
+    def get_container_for_item(self, container_type, item_id):
+        return self.repository.get_container_for_item(
+            container_type, item_id
+        )
+
     def search_containers(self, text):
 
         return self.repository.search_containers(text)

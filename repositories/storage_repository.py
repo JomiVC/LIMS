@@ -708,6 +708,35 @@ class StorageRepository:
                 (container_id,)
             )
 
+    def get_container_for_item(self, container_type: str, item_id: int):
+        """
+        Finds the container (and its full location path) currently
+        holding a given item, if any. Used by the Samples search.
+        """
+
+        column, _ = self._ITEM_LINK_COLUMNS[container_type]
+
+        with self._conn() as conn:
+
+            row = conn.execute(
+                f"""
+                SELECT
+                    c.id,
+                    c.label,
+                    p.position,
+                    b.box_name,
+                    r.rack_name
+                FROM storage_containers c
+                JOIN storage_positions p ON c.position_id = p.id
+                JOIN storage_boxes b ON p.box_id = b.id
+                JOIN storage_racks r ON b.rack_id = r.id
+                WHERE c.{column} = ?
+                """,
+                (item_id,)
+            ).fetchone()
+
+        return dict(row) if row else None
+
     def search_containers(self, text: str) -> list[dict]:
         """
         Returns raw dicts since this is a denormalized join across
