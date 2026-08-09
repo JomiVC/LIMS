@@ -50,6 +50,8 @@ class Rack:
     freezer_id: int
     rack_name: str
     rack_type: str  # 'EPPENDORF' | 'FALCON'
+    has_shelf: bool
+    slot_count: int
     description: Optional[str]
 
     def __post_init__(self) -> None:
@@ -63,6 +65,8 @@ class Rack:
             freezer_id=row["freezer_id"],
             rack_name=row["rack_name"],
             rack_type=row["rack_type"],
+            has_shelf=bool(row["has_shelf"]),
+            slot_count=row["slot_count"],
             description=row["description"],
         )
 

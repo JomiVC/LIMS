@@ -85,6 +85,12 @@ def create_storage_racks_table(conn: Connection) -> None:
             rack_type TEXT NOT NULL
                 CHECK(rack_type IN ('EPPENDORF','FALCON')),
 
+            has_shelf INTEGER NOT NULL DEFAULT 0
+                CHECK(has_shelf IN (0,1)),
+
+            slot_count INTEGER NOT NULL DEFAULT 5
+                CHECK(slot_count > 0),
+
             description TEXT,
 
             FOREIGN KEY(freezer_id)
@@ -390,101 +396,3 @@ if __name__ == "__main__":
     initialize_database()
 
     print("Storage schema successfully initialized.")
-
-def create_samples_table(conn: Connection) -> None:
-    """
-    Stores the scientific/sample-level information.
-
-    One sample represents one protein batch/material.
-    Individual aliquots are stored separately in storage_aliquots.
-    """
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS samples (
-
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            protein_name TEXT NOT NULL,
-
-            construct TEXT,
-
-            variant TEXT,
-
-            media TEXT NOT NULL
-                CHECK(media IN ('LB', '15N', '15N13C', 'Other')),
-
-            batch_no TEXT NOT NULL,
-
-            concentration_um REAL,
-
-            volume_ul REAL,
-
-            buffer TEXT,
-
-            date_stored TEXT,
-
-            notebook_ref TEXT,
-
-            total_aliquots INTEGER NOT NULL
-                CHECK(total_aliquots > 0),
-
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-            active INTEGER NOT NULL DEFAULT 1
-                CHECK(active IN (0,1))
-
-        );
-        """
-    )
-
-
-def create_storage_aliquots_table(conn: Connection) -> None:
-    """
-    Stores each aliquot as an individual entity.
-
-    Every aliquot occupies at most one physical storage position.
-    """
-
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS storage_aliquots (
-
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-            sample_id INTEGER NOT NULL,
-
-            position_id INTEGER NOT NULL,
-
-            aliquot_number INTEGER NOT NULL,
-
-            status TEXT NOT NULL DEFAULT 'AVAILABLE'
-                CHECK(
-                    status IN (
-                        'AVAILABLE',
-                        'USED',
-                        'DISPOSED'
-                    )
-                ),
-
-            date_used TEXT,
-
-            notes TEXT,
-
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-            FOREIGN KEY(sample_id)
-                REFERENCES samples(id)
-                ON DELETE RESTRICT,
-
-            FOREIGN KEY(position_id)
-                REFERENCES storage_positions(id)
-                ON DELETE RESTRICT,
-
-            UNIQUE(position_id),
-
-            UNIQUE(sample_id, aliquot_number)
-
-        );
-        """
-    )

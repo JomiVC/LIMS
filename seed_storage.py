@@ -5,8 +5,8 @@ One-off script to seed a freezer and the lab's real racks, until
 the Freezer/Rack management UI exists.
 
 Racks:
-    "1".."40"  -> EPPENDORF, no shelves
-    "A".."D"   -> FALCON, has shelves (Upper/Lower)
+    "1".."40"  -> EPPENDORF, no shelves, 5 slots
+    "A".."D"   -> FALCON, 2 shelves (Upper/Lower), 3 slots
 
 Run from the project root:
     python seed_storage.py
@@ -32,25 +32,23 @@ def seed():
 
     racks = []
 
-    # Numeric racks: 1-40, EPPENDORF, no shelves
+    # Numeric racks: 1-40, EPPENDORF, no shelves, 5 slots
     for number in range(1, 41):
-        racks.append((str(number), "EPPENDORF"))
+        racks.append((str(number), "EPPENDORF", 0, 5))
 
-    # Lettered racks: A-D, FALCON, with shelves
-    # (has_shelf is determined by StorageService.get_rack_configuration,
-    # which checks rack_name in ("A", "B", "C", "D") -- no schema
-    # change needed here, that logic already exists.)
+    # Lettered racks: A-D, FALCON, 2 shelves, 3 slots
     for letter in "ABCD":
-        racks.append((letter, "FALCON"))
+        racks.append((letter, "FALCON", 1, 3))
 
-    for rack_name, rack_type in racks:
+    for rack_name, rack_type, has_shelf, slot_count in racks:
         conn.execute(
             """
             INSERT INTO storage_racks
-            (freezer_id, rack_name, rack_type, description)
-            VALUES (?, ?, ?, ?)
+            (freezer_id, rack_name, rack_type, has_shelf,
+             slot_count, description)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (freezer_id, rack_name, rack_type, ""),
+            (freezer_id, rack_name, rack_type, has_shelf, slot_count, ""),
         )
 
     conn.commit()

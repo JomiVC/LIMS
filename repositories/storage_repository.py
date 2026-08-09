@@ -48,6 +48,14 @@ class DuplicateBoxNameError(StorageError):
     pass
 
 
+class RackAlreadyExistsError(StorageError):
+    pass
+
+
+class FreezerAlreadyExistsError(StorageError):
+    pass
+
+
 class DuplicatePositionError(StorageError):
     pass
 
@@ -79,6 +87,61 @@ class StorageRepository:
 
         finally:
             conn.close()
+
+    # =====================================================
+    # FREEZERS
+    # =====================================================
+
+    def list_freezers(self) -> list[Freezer]:
+
+        with self._conn() as conn:
+
+            cursor = conn.execute(
+                "SELECT * FROM storage_freezers ORDER BY name"
+            )
+
+            return [Freezer.from_row(row) for row in cursor.fetchall()]
+
+    def get_freezer(self, freezer_id: int) -> Freezer | None:
+
+        with self._conn() as conn:
+
+            row = conn.execute(
+                "SELECT * FROM storage_freezers WHERE id = ?",
+                (freezer_id,)
+            ).fetchone()
+
+        return Freezer.from_row(row) if row else None
+
+    def create_freezer(
+        self,
+        name: str,
+        temperature: float | None,
+        description: str = ""
+    ) -> int:
+
+        with self._conn() as conn:
+
+            existing = conn.execute(
+                "SELECT 1 FROM storage_freezers WHERE name = ?",
+                (name,)
+            ).fetchone()
+
+            if existing:
+                raise FreezerAlreadyExistsError(
+                    f"A freezer named '{name}' already exists."
+                )
+
+            cursor = conn.execute(
+                """
+                INSERT INTO storage_freezers
+                (name, temperature, description)
+                VALUES (?, ?, ?)
+                """,
+                (name, temperature, description)
+            )
+
+            return cursor.lastrowid
 
     # =====================================================
     # RACKS
@@ -121,6 +184,55 @@ class StorageRepository:
             row = cursor.fetchone()
 
         return Rack.from_row(row) if row else None
+
+    def create_rack(
+        self,
+        freezer_id: int,
+        rack_name: str,
+        rack_type: str,
+        has_shelf: bool,
+        slot_count: int,
+        description: str = ""
+    ) -> int:
+        """
+        Not yet exposed in any page -- the lab's racks were seeded
+        directly for now. Wire this up once a Rack management UI
+        exists.
+        """
+
+        with self._conn() as conn:
+
+            existing = conn.execute(
+                """
+                SELECT 1 FROM storage_racks
+                WHERE freezer_id = ? AND rack_name = ?
+                """,
+                (freezer_id, rack_name)
+            ).fetchone()
+
+            if existing:
+                raise RackAlreadyExistsError(
+                    f"Rack '{rack_name}' already exists in this freezer."
+                )
+
+            cursor = conn.execute(
+                """
+                INSERT INTO storage_racks
+                (freezer_id, rack_name, rack_type, has_shelf,
+                 slot_count, description)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    freezer_id,
+                    rack_name,
+                    rack_type,
+                    int(has_shelf),
+                    slot_count,
+                    description,
+                )
+            )
+
+            return cursor.lastrowid
 
     def _rack_exists(self, conn: sqlite3.Connection, rack_id: int) -> bool:
 

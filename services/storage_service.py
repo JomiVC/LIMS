@@ -25,6 +25,42 @@ class StorageService:
     # RACKS
     # =====================================================
 
+    # =====================================================
+    # FREEZERS
+    # =====================================================
+
+    def list_freezers(self):
+        return self.repository.list_freezers()
+
+    def get_freezer(self, freezer_id):
+
+        freezer = self.repository.get_freezer(freezer_id)
+
+        if freezer is None:
+            raise ValueError("Freezer not found.")
+
+        return freezer
+
+    def create_freezer(self, name, temperature=None, description=""):
+
+        name = name.strip()
+
+        if not name:
+            raise ValueError("Freezer name cannot be empty.")
+
+        try:
+            return self.repository.create_freezer(
+                name=name,
+                temperature=temperature,
+                description=description,
+            )
+        except StorageError as e:
+            raise ValueError(str(e)) from e
+
+    # =====================================================
+    # RACKS
+    # =====================================================
+
     def list_racks(self):
 
         return self.repository.list_racks()
@@ -42,25 +78,51 @@ class StorageService:
 
         rack = self.get_rack(rack_id)
 
-        if rack.rack_name in ("A", "B", "C", "D"):
-
-            return {
-                "rack_id": rack.id,
-                "rack_name": rack.rack_name,
-                "rack_type": rack.rack_type,
-                "has_shelf": True,
-                "shelves": ["Upper", "Lower"],
-                "slots": [1, 2, 3, 4, 5],
-            }
-
         return {
             "rack_id": rack.id,
             "rack_name": rack.rack_name,
             "rack_type": rack.rack_type,
-            "has_shelf": False,
-            "shelves": [],
-            "slots": [1, 2, 3, 4, 5],
+            "has_shelf": rack.has_shelf,
+            "shelves": ["Upper", "Lower"] if rack.has_shelf else [],
+            "slots": list(range(1, rack.slot_count + 1)),
         }
+
+    def create_rack(
+        self,
+        freezer_id,
+        rack_name,
+        rack_type,
+        has_shelf,
+        slot_count,
+        description=""
+    ):
+        """
+        Not yet used by any page -- exposed so a future Rack
+        management UI can call it without touching this layer.
+        """
+
+        rack_name = rack_name.strip()
+
+        if not rack_name:
+            raise ValueError("Rack name cannot be empty.")
+
+        if rack_type not in ("EPPENDORF", "FALCON"):
+            raise ValueError("Invalid rack type.")
+
+        if slot_count < 1:
+            raise ValueError("Slot count must be at least 1.")
+
+        try:
+            return self.repository.create_rack(
+                freezer_id=freezer_id,
+                rack_name=rack_name,
+                rack_type=rack_type,
+                has_shelf=has_shelf,
+                slot_count=slot_count,
+                description=description,
+            )
+        except StorageError as e:
+            raise ValueError(str(e)) from e
 
     # =====================================================
     # BOXES
