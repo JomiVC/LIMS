@@ -50,7 +50,7 @@ class StorageService:
                 "rack_type": rack.rack_type,
                 "has_shelf": True,
                 "shelves": ["Upper", "Lower"],
-                "slots": [1, 2, 3],
+                "slots": [1, 2, 3, 4, 5],
             }
 
         return {
@@ -185,6 +185,10 @@ class StorageService:
 
         return self.repository.list_positions(box_id)
 
+    def get_position_by_name(self, box_id, position_name):
+
+        return self.repository.get_position_by_name(box_id, position_name)
+
     def get_position(self, position_id):
 
         position = self.repository.get_position(position_id)
@@ -257,4 +261,3 @@ class StorageService:
     def delete_container(self, container_id):
 
         self.repository.delete_container(container_id)
-
