@@ -33,6 +33,10 @@ def render_box_grid(box, occupied_positions, selectable=False, key_prefix=""):
         rows = list("ABCD")
         columns = list(range(1, 5))
 
+    elif box.box_type == "FALCON_15":
+        rows = list("ABCDEFG")
+        columns = list(range(1, 8))
+
     else:
         st.warning(f"Unknown geometry for box '{box.box_name}'.")
         return None

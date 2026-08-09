@@ -2,43 +2,47 @@
 
 ## Overview
 
-LIMS is a Laboratory Information Management System developed for a molecular biology research laboratory.
+LIMS is a Laboratory Information Management System developed for a
+molecular biology research laboratory.
 
-The application manages laboratory inventory, protein production, DNA stock, storage locations and purchase orders while maintaining compatibility with the laboratory's existing Excel workflow.
+The application manages laboratory inventory, protein production,
+DNA stock, storage locations, E.Coli strains, cell culture, and
+purchase orders, while maintaining compatibility with the
+laboratory's existing Excel workflow.
 
-The project is designed to evolve incrementally from an initial prototype into a scalable and maintainable application.
+The project is designed to evolve incrementally from an initial
+prototype into a scalable and maintainable application. Modules are
+built one at a time: each module's requirements are specified in
+detail before implementation begins.
 
----
+## Modules
 
-## Main Features
+- **Reagents** — Search, Orders, Register/delete items
+- **DNA** — Search, Register
+- **Proteins** — Search, Register, Expressed proteins, Purified
+  proteins, Proteases
+- **Storage** — Samples, Boxes, New equipment (create box / rack /
+  freezer)
+- **E.Coli strains** — Search, Register
+- **Cell culture** — Search, Register
+- **Research Assistant** — Plan an experiment (the only module
+  without a search)
 
-Current and planned modules include:
+Every module has its own search, except Research Assistant.
+Protein, protease, DNA, and E.Coli strain registrations support
+file attachments (PDFs, chromatograms, scanned gels, etc.).
 
-- Reagent inventory
-- DNA inventory
-- Protein expression
-- Protein purification
-- Aliquot management
-- Storage management
-- Purchase orders
-- User management
-- Inventory history
-- Excel synchronization
-- QR code support (future)
-- Statistics and dashboards (future)
-
----
+Planned for later: Excel synchronization, QR code support,
+statistics and dashboards.
 
 ## Technology Stack
 
 - Python
 - Streamlit
-- SQLite
+- SQLite (WAL mode, for concurrent multi-user access)
 - Pandas
 - Google Drive API
 - Git & GitHub
-
----
 
 ## Project Structure
 
@@ -61,13 +65,10 @@ requirements.txt
 README.md
 ```
 
----
-
 ## Documentation
 
-Project documentation is located in the `docs` folder.
-
-The main documents are:
+Project documentation is located in the `docs` folder. The main
+documents are:
 
 - Architecture
 - Domain Model
@@ -77,6 +78,29 @@ The main documents are:
 - Software Architecture
 - Decision Log
 - Roadmap
+
+## Development Principles
+
+- Incremental development — one module, one visible feature at a
+  time
+- Clean architecture with clear layer separation (models →
+  repositories → services → pages)
+- Reuse existing code whenever possible
+- Avoid unnecessary refactoring
+- Excel compatibility
+- Long-term maintainability
+- All UI text in English
+
+## Current Status
+
+**Storage module in progress.** Freezers, racks, and boxes can be
+registered and browsed. Items (DNA / protein aliquots / reagent
+lots) can be assigned to free positions, though those item types
+are still minimal stub tables pending their own dedicated modules.
+
+## Author
+
+Developed by Jomi for the Laboratory of Molecular Biology.
 
 ---
 

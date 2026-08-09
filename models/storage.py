@@ -81,7 +81,7 @@ class Box:
     id: Optional[int]
     box_name: str
     legacy_name: Optional[str]
-    box_type: str  # 'EPPENDORF' | 'FALCON'
+    box_type: str  # 'EPPENDORF' | 'FALCON' | 'FALCON_15'
     owner: Optional[str]
     rack_id: int
     shelf: Optional[int]
@@ -90,7 +90,7 @@ class Box:
     active: bool = True
 
     def __post_init__(self) -> None:
-        if self.box_type not in ("EPPENDORF", "FALCON"):
+        if self.box_type not in ("EPPENDORF", "FALCON", "FALCON_15"):
             raise ValueError(f"Invalid box_type: {self.box_type}")
 
     @classmethod

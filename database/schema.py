@@ -117,7 +117,9 @@ def create_storage_boxes_table(conn: Connection) -> None:
             legacy_name TEXT,
 
             box_type TEXT NOT NULL
-                CHECK(box_type IN ('EPPENDORF','FALCON')),
+                CHECK(box_type IN ('EPPENDORF','FALCON','FALCON_15')),
+            -- 'FALCON' = Falcon 50ml (4x4 grid)
+            -- 'FALCON_15' = Falcon 15ml (7x7 grid)
 
             owner TEXT,
 

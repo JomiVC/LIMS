@@ -473,6 +473,9 @@ class StorageRepository:
             elif box_type.upper() == "FALCON":
                 rows, cols = "ABCD", range(1, 5)
 
+            elif box_type.upper() == "FALCON_15":
+                rows, cols = "ABCDEFG", range(1, 8)
+
             else:
                 raise ValueError(f"Unknown box type: {box_type}")
 
