@@ -74,6 +74,14 @@ class StorageService:
 
         return rack
 
+    # Which box types are physically compatible with each rack type.
+    # FALCON racks (A-D) hold both Falcon tube sizes; EPPENDORF racks
+    # (1-40) only hold EPPENDORF boxes.
+    ALLOWED_BOX_TYPES_BY_RACK_TYPE = {
+        "EPPENDORF": ["EPPENDORF"],
+        "FALCON": ["FALCON_15", "FALCON"],
+    }
+
     def get_rack_configuration(self, rack_id):
 
         rack = self.get_rack(rack_id)
@@ -85,6 +93,9 @@ class StorageService:
             "has_shelf": rack.has_shelf,
             "shelves": ["Upper", "Lower"] if rack.has_shelf else [],
             "slots": list(range(1, rack.slot_count + 1)),
+            "allowed_box_types": self.ALLOWED_BOX_TYPES_BY_RACK_TYPE[
+                rack.rack_type
+            ],
         }
 
     def create_rack(
@@ -165,10 +176,16 @@ class StorageService:
         if not box_name:
             raise ValueError("Box name cannot be empty.")
 
-        if box_type not in ("EPPENDORF", "FALCON"):
+        if box_type not in ("EPPENDORF", "FALCON", "FALCON_15"):
             raise ValueError("Invalid box type.")
 
         config = self.get_rack_configuration(rack_id)
+
+        if box_type not in config["allowed_box_types"]:
+            raise ValueError(
+                f"Box type '{box_type}' cannot be placed in a "
+                f"{config['rack_type']} rack ('{config['rack_name']}')."
+            )
 
         if config["has_shelf"]:
             if shelf not in ("Upper", "Lower"):

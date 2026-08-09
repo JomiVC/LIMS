@@ -23,6 +23,7 @@ import streamlit as st
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from ui.box_grid import render_box_grid
+from ui.rack_grid import render_rack_grid
 
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
@@ -116,29 +117,79 @@ with tab_boxes:
 
     with browse_tab:
 
-        boxes = storage_service.list_boxes()
-        all_racks = storage_service.list_racks()
-        rack_options_browse = {
-            rack.id: rack.rack_name for rack in all_racks
-        }
+        freezers = storage_service.list_freezers()
 
-        if not boxes:
-            st.info("No boxes registered yet.")
+        if not freezers:
+            st.info("No freezers registered yet.")
 
         else:
-            for box in boxes:
+            freezer_options = {f.id: f.name for f in freezers}
 
-                rack_name = rack_options_browse.get(
-                    box.rack_id, "unknown rack"
+            if len(freezers) > 1:
+                selected_freezer_id = st.selectbox(
+                    "Freezer",
+                    options=list(freezer_options.keys()),
+                    format_func=lambda fid: freezer_options[fid],
+                    key="browse_freezer_select",
                 )
+            else:
+                selected_freezer_id = freezers[0].id
 
-                with st.expander(
-                    f"{box.box_name} ({box.box_type}) — {rack_name} "
-                    f"— {box.owner or 'no owner'}"
-                ):
+            all_racks = storage_service.list_racks()
+            freezer_racks = [
+                r for r in all_racks
+                if r.freezer_id == selected_freezer_id
+            ]
+
+            clicked_rack_id = render_rack_grid(
+                freezer_racks, key_prefix="browse"
+            )
+
+            if clicked_rack_id:
+                st.session_state["browse_selected_rack_id"] = (
+                    clicked_rack_id
+                )
+                # A newly clicked rack invalidates any previously
+                # selected box from a different rack.
+                st.session_state.pop("browse_selected_box_id", None)
+
+            selected_rack_id = st.session_state.get(
+                "browse_selected_rack_id"
+            )
+
+            if not selected_rack_id:
+                st.info("Click a rack above to see its boxes.")
+
+            else:
+                rack = storage_service.get_rack(selected_rack_id)
+
+                boxes_in_rack = [
+                    b for b in storage_service.list_boxes()
+                    if b.rack_id == selected_rack_id
+                ]
+
+                st.divider()
+                st.subheader(f"Rack {rack.rack_name}")
+
+                if not boxes_in_rack:
+                    st.info("No boxes in this rack yet.")
+
+                else:
+                    box_options = {
+                        b.id: b.box_name for b in boxes_in_rack
+                    }
+
+                    selected_box_id = st.selectbox(
+                        "Box",
+                        options=list(box_options.keys()),
+                        format_func=lambda bid: box_options[bid],
+                        key="browse_box_select",
+                    )
+
+                    box = storage_service.get_box(selected_box_id)
 
                     st.write(
-                        f"**Slot:** {box.shelf or '—'} / {box.slot}"
+                        f"**Slot:** {box.shelf or '\u2014'} / {box.slot}"
                     )
 
                     if box.notes:
@@ -161,26 +212,28 @@ with tab_boxes:
                     st.divider()
 
                     edit_tab, delete_tab = st.tabs(
-                        ["✏️ Edit", "🗑️ Delete"]
+                        ["\u270f\ufe0f Edit", "\U0001F5D1\ufe0f Delete"]
                     )
 
                     # --- EDIT ---
                     with edit_tab:
 
+                        all_rack_options = {
+                            r.id: r.rack_name for r in all_racks
+                        }
+
                         with st.form(f"edit_box_{box.id}"):
 
                             new_rack_id = st.selectbox(
                                 "Rack",
-                                options=list(
-                                    rack_options_browse.keys()
-                                ),
+                                options=list(all_rack_options.keys()),
                                 format_func=lambda rid: (
-                                    rack_options_browse[rid]
+                                    all_rack_options[rid]
                                 ),
                                 index=list(
-                                    rack_options_browse.keys()
+                                    all_rack_options.keys()
                                 ).index(box.rack_id)
-                                    if box.rack_id in rack_options_browse
+                                    if box.rack_id in all_rack_options
                                     else 0,
                                 key=f"edit_rack_{box.id}",
                             )
@@ -456,13 +509,20 @@ with tab_new_equipment:
                 selected_rack_id
             )
 
+            BOX_TYPE_LABELS = {
+                "EPPENDORF": "EPPENDORF",
+                "FALCON_15": "FALCON 15ml",
+                "FALCON": "FALCON 50ml",
+            }
+
             with st.form("create_box_form", clear_on_submit=True):
 
                 box_name = st.text_input("Box name")
 
                 box_type = st.selectbox(
                     "Box type",
-                    options=["EPPENDORF", "FALCON", "FALCON_15"],
+                    options=config["allowed_box_types"],
+                    format_func=lambda bt: BOX_TYPE_LABELS[bt],
                 )
 
                 if config["has_shelf"]:
