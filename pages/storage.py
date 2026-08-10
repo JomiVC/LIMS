@@ -19,6 +19,7 @@ Structure:
 """
 
 import streamlit as st
+from collections import defaultdict
 
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
@@ -141,17 +142,26 @@ with tab_boxes:
                 if r.freezer_id == selected_freezer_id
             ]
 
+            all_boxes = storage_service.list_boxes()
+            boxes_by_rack_id = defaultdict(list)
+            for b in all_boxes:
+                boxes_by_rack_id[b.rack_id].append(b)
+
+            previously_selected_rack_id = st.session_state.get(
+                "browse_selected_rack_id"
+            )
+
             clicked_rack_id = render_rack_grid(
-                freezer_racks, key_prefix="browse"
+                freezer_racks,
+                key_prefix="browse",
+                selected_rack_id=previously_selected_rack_id,
+                boxes_by_rack_id=boxes_by_rack_id,
             )
 
             if clicked_rack_id:
                 st.session_state["browse_selected_rack_id"] = (
                     clicked_rack_id
                 )
-                # A newly clicked rack invalidates any previously
-                # selected box from a different rack.
-                st.session_state.pop("browse_selected_box_id", None)
 
             selected_rack_id = st.session_state.get(
                 "browse_selected_rack_id"
@@ -161,35 +171,28 @@ with tab_boxes:
                 st.info("Click a rack above to see its boxes.")
 
             else:
-                rack = storage_service.get_rack(selected_rack_id)
+                boxes_in_rack = boxes_by_rack_id.get(
+                    selected_rack_id, []
+                )
 
-                boxes_in_rack = [
-                    b for b in storage_service.list_boxes()
-                    if b.rack_id == selected_rack_id
-                ]
-
-                st.divider()
-                st.subheader(f"Rack {rack.rack_name}")
+                selected_box_id = st.session_state.get(
+                    f"browse_box_select_{selected_rack_id}"
+                )
 
                 if not boxes_in_rack:
-                    st.info("No boxes in this rack yet.")
+                    pass  # "No boxes" caption already shown in the grid
+
+                elif not selected_box_id:
+                    st.info("Choose a box from the dropdown above.")
 
                 else:
-                    box_options = {
-                        b.id: b.box_name for b in boxes_in_rack
-                    }
-
-                    selected_box_id = st.selectbox(
-                        "Box",
-                        options=list(box_options.keys()),
-                        format_func=lambda bid: box_options[bid],
-                        key="browse_box_select",
-                    )
-
                     box = storage_service.get_box(selected_box_id)
 
+                    st.divider()
+
+                    shelf_display = box.shelf or "—"
                     st.write(
-                        f"**Slot:** {box.shelf or '\u2014'} / {box.slot}"
+                        f"**Slot:** {shelf_display} / {box.slot}"
                     )
 
                     if box.notes:
