@@ -24,7 +24,11 @@ from collections import defaultdict
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from ui.box_grid import render_box_grid
-from ui.rack_grid import render_rack_grid, get_rack_slot_combos
+from ui.rack_grid import (
+    render_rack_grid,
+    get_rack_slot_combos,
+    clear_active_selection,
+)
 
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
@@ -139,6 +143,7 @@ def show_box_dialog(box, all_racks):
                         st.error(str(e))
                     else:
                         st.success("Box updated.")
+                        clear_active_selection("browse")
                         st.rerun()
 
         # --- DELETE ---
@@ -165,6 +170,7 @@ def show_box_dialog(box, all_racks):
                     st.error(str(e))
                 else:
                     st.success(f"Box '{box.box_name}' deleted.")
+                    clear_active_selection("browse")
                     st.rerun()
 
     _dialog()
@@ -283,61 +289,42 @@ with tab_boxes:
             for b in all_boxes:
                 boxes_by_rack_id[b.rack_id].append(b)
 
-            previously_selected_rack_id = st.session_state.get(
-                "browse_selected_rack_id"
-            )
-
-            clicked_rack_id = render_rack_grid(
+            active = render_rack_grid(
                 freezer_racks,
                 key_prefix="browse",
-                selected_rack_id=previously_selected_rack_id,
                 boxes_by_rack_id=boxes_by_rack_id,
             )
 
-            if clicked_rack_id:
-                st.session_state["browse_selected_rack_id"] = (
-                    clicked_rack_id
+            if not active:
+                st.info(
+                    "Open a rack's dropdown above and pick a slot "
+                    "to see its box."
                 )
-
-            selected_rack_id = st.session_state.get(
-                "browse_selected_rack_id"
-            )
-
-            if not selected_rack_id:
-                st.info("Click a rack above to see its boxes.")
 
             else:
-                selected_rack = storage_service.get_rack(
-                    selected_rack_id
-                )
-                combos = get_rack_slot_combos(selected_rack)
+                active_rack_id, active_index = active
+
+                active_rack = storage_service.get_rack(active_rack_id)
+                combos = get_rack_slot_combos(active_rack)
 
                 boxes_in_rack = boxes_by_rack_id.get(
-                    selected_rack_id, []
+                    active_rack_id, []
                 )
                 box_by_slot = {
                     (b.shelf, b.slot): b for b in boxes_in_rack
                 }
 
-                selected_index = st.session_state.get(
-                    f"browse_box_select_{selected_rack_id}"
-                )
+                shelf, slot = combos[active_index]
+                box = box_by_slot.get((shelf, slot))
 
-                if selected_index is None:
-                    st.info("Choose a slot from the dropdown above.")
+                if box is None:
+                    st.info(
+                        "This slot is empty. Register a box here "
+                        "from 'New equipment > Create Box'."
+                    )
 
                 else:
-                    shelf, slot = combos[selected_index]
-                    box = box_by_slot.get((shelf, slot))
-
-                    if box is None:
-                        st.info(
-                            "This slot is empty. Register a box "
-                            "here from 'New equipment > Create Box'."
-                        )
-
-                    else:
-                        show_box_dialog(box, all_racks)
+                    show_box_dialog(box, all_racks)
 
 
     # ------------------------------------------------------
