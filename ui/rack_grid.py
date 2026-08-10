@@ -2,8 +2,9 @@
 ui/rack_grid.py
 
 Renders the racks of a freezer as a spatial grid, grouped by rack
-type. Fill order is left-to-right, top-to-bottom (rack "1" top-left,
-last rack bottom-right).
+type. Fill order is top-to-bottom within each column, then moves to
+the next column (rack "1" top of column 1, "8" bottom of column 1,
+"9" top of column 2, and so on).
 
 Layout assumption: EPPENDORF racks are laid out 8 per column
 (matches the lab's Freezer 1: 40 racks -> 5 columns x 8 rows).
@@ -12,10 +13,11 @@ is derived from how many racks of that type exist, so this still
 works for freezers with a different rack count -- it isn't hardcoded
 to exactly 40/4.
 
-If `selected_rack_id` is given and `boxes_by_rack_id` provides that
-rack's boxes, a box dropdown is rendered directly under that rack's
-button, in the same grid cell -- not in a separate section below the
-whole grid.
+If `selected_rack_id` is given, a box dropdown is rendered directly
+under that rack's button, in the same grid cell. The dropdown always
+lists every physical slot in the rack (shelf x slot combinations, in
+order), whether occupied or not -- occupied slots show the box name,
+empty ones show "EMPTY".
 """
 
 import math
@@ -30,6 +32,25 @@ ROWS_BY_RACK_TYPE = {
 }
 
 
+def get_rack_slot_combos(rack):
+    """
+    Returns the ordered list of (shelf, slot) pairs representing
+    every physical box position in a rack. `shelf` is None for
+    racks without shelves.
+    """
+
+    slots = list(range(1, rack.slot_count + 1))
+
+    if rack.has_shelf:
+        return [
+            (shelf, slot)
+            for shelf in ("Upper", "Lower")
+            for slot in slots
+        ]
+
+    return [(None, slot) for slot in slots]
+
+
 def render_rack_grid(
     racks,
     key_prefix="",
@@ -42,10 +63,11 @@ def render_rack_grid(
 
     `boxes_by_rack_id`, if given, is a dict {rack_id: [Box, ...]}.
     When the rack in a given cell matches `selected_rack_id`, its
-    box dropdown is rendered right under its button. The chosen
-    box's id ends up in
-    st.session_state[f"{key_prefix}_box_select_{rack_id}"] --
-    read it there after calling this function.
+    slot dropdown is rendered right under its button. The selected
+    slot's index (into get_rack_slot_combos(rack)) ends up in
+    st.session_state[f"{key_prefix}_box_select_{rack_id}"] -- use
+    get_rack_slot_combos() with that index to resolve it back to a
+    (shelf, slot) pair after calling this function.
 
     Returns the id of the rack that was clicked this rerun, or None.
     """
@@ -76,9 +98,7 @@ def render_rack_grid(
 
         st.markdown(f"**{rack_type} racks**")
 
-        index = 0
-
-        for _ in range(rows):
+        for row_index in range(rows):
 
             row_columns = st.columns(cols)
 
@@ -86,12 +106,13 @@ def render_rack_grid(
 
                 with row_columns[col]:
 
+                    index = col * rows + row_index
+
                     if index >= len(group):
                         st.write("")
                         continue
 
                     rack = group[index]
-                    index += 1
 
                     if st.button(
                         rack.rack_name,
@@ -100,32 +121,36 @@ def render_rack_grid(
                     ):
                         clicked_rack_id = rack.id
 
-                    if (
-                        boxes_by_rack_id is not None
-                        and selected_rack_id == rack.id
-                    ):
-                        boxes = boxes_by_rack_id.get(rack.id, [])
+                    if selected_rack_id == rack.id:
 
-                        if not boxes:
-                            st.caption("No boxes")
+                        boxes = (
+                            boxes_by_rack_id.get(rack.id, [])
+                            if boxes_by_rack_id
+                            else []
+                        )
+                        box_by_slot = {
+                            (b.shelf, b.slot): b for b in boxes
+                        }
 
-                        else:
-                            box_options = {
-                                b.id: b.box_name for b in boxes
-                            }
+                        combos = get_rack_slot_combos(rack)
 
-                            st.selectbox(
-                                "Box",
-                                options=list(box_options.keys()),
-                                format_func=lambda bid: (
-                                    box_options[bid]
-                                ),
-                                key=(
-                                    f"{key_prefix}_box_select_"
-                                    f"{rack.id}"
-                                ),
-                                label_visibility="collapsed",
+                        def _format_slot(i, combos=combos, box_by_slot=box_by_slot):
+                            shelf, slot = combos[i]
+                            box = box_by_slot.get((shelf, slot))
+                            name = box.box_name if box else "EMPTY"
+                            prefix = (
+                                f"{shelf} {slot}" if shelf
+                                else f"Slot {slot}"
                             )
+                            return f"{prefix}: {name}"
+
+                        st.selectbox(
+                            "Slot",
+                            options=list(range(len(combos))),
+                            format_func=_format_slot,
+                            key=f"{key_prefix}_box_select_{rack.id}",
+                            label_visibility="collapsed",
+                        )
 
         st.caption("")  # small spacing between rack-type sections
 

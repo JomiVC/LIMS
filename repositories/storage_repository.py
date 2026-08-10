@@ -56,6 +56,10 @@ class FreezerAlreadyExistsError(StorageError):
     pass
 
 
+class SlotOccupiedError(StorageError):
+    pass
+
+
 class DuplicatePositionError(StorageError):
     pass
 
@@ -243,6 +247,31 @@ class StorageRepository:
 
         return cursor.fetchone() is not None
 
+    def _slot_occupied(
+        self,
+        conn: sqlite3.Connection,
+        rack_id: int,
+        shelf,
+        slot: int,
+        exclude_box_id: int | None = None
+    ) -> bool:
+        """
+        `shelf` may be None (racks without shelves) -- 'IS ?' is
+        used instead of '=' so the NULL comparison works correctly.
+        """
+
+        query = (
+            "SELECT id FROM storage_boxes "
+            "WHERE rack_id = ? AND slot = ? AND shelf IS ?"
+        )
+        params = [rack_id, slot, shelf]
+
+        if exclude_box_id is not None:
+            query += " AND id != ?"
+            params.append(exclude_box_id)
+
+        return conn.execute(query, params).fetchone() is not None
+
     # =====================================================
     # BOXES
     # =====================================================
@@ -273,6 +302,13 @@ class StorageRepository:
             if existing:
                 raise DuplicateBoxNameError(
                     f"A box named '{box_name}' already exists."
+                )
+
+            if self._slot_occupied(conn, rack_id, shelf, slot):
+                raise SlotOccupiedError(
+                    f"Slot {slot}"
+                    f"{f' ({shelf})' if shelf else ''} in this rack "
+                    f"is already occupied by another box."
                 )
 
             cursor = conn.execute(
@@ -326,6 +362,15 @@ class StorageRepository:
             if not self._rack_exists(conn, rack_id):
                 raise RackNotFoundError(
                     f"Rack {rack_id} does not exist."
+                )
+
+            if self._slot_occupied(
+                conn, rack_id, shelf, slot, exclude_box_id=box_id
+            ):
+                raise SlotOccupiedError(
+                    f"Slot {slot}"
+                    f"{f' ({shelf})' if shelf else ''} in this rack "
+                    f"is already occupied by another box."
                 )
 
             conn.execute(

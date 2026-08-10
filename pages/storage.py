@@ -24,7 +24,7 @@ from collections import defaultdict
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from ui.box_grid import render_box_grid
-from ui.rack_grid import render_rack_grid
+from ui.rack_grid import render_rack_grid, get_rack_slot_combos
 
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
@@ -171,166 +171,179 @@ with tab_boxes:
                 st.info("Click a rack above to see its boxes.")
 
             else:
+                selected_rack = storage_service.get_rack(
+                    selected_rack_id
+                )
+                combos = get_rack_slot_combos(selected_rack)
+
                 boxes_in_rack = boxes_by_rack_id.get(
                     selected_rack_id, []
                 )
+                box_by_slot = {
+                    (b.shelf, b.slot): b for b in boxes_in_rack
+                }
 
-                selected_box_id = st.session_state.get(
+                selected_index = st.session_state.get(
                     f"browse_box_select_{selected_rack_id}"
                 )
 
-                if not boxes_in_rack:
-                    pass  # "No boxes" caption already shown in the grid
-
-                elif not selected_box_id:
-                    st.info("Choose a box from the dropdown above.")
+                if selected_index is None:
+                    st.info("Choose a slot from the dropdown above.")
 
                 else:
-                    box = storage_service.get_box(selected_box_id)
+                    shelf, slot = combos[selected_index]
+                    box = box_by_slot.get((shelf, slot))
 
-                    st.divider()
+                    if box is None:
+                        st.info(
+                            "This slot is empty. Register a box "
+                            "here from 'New equipment > Create Box'."
+                        )
 
-                    shelf_display = box.shelf or "—"
-                    st.write(
-                        f"**Slot:** {shelf_display} / {box.slot}"
-                    )
+                    else:
+                        st.divider()
 
-                    if box.notes:
-                        st.write(f"**Notes:** {box.notes}")
+                        shelf_display = box.shelf or "—"
+                        st.write(
+                            f"**Slot:** {shelf_display} / {box.slot}"
+                        )
 
-                    free = storage_service.list_free_positions(box.id)
-                    occupied = storage_service.list_occupied_positions(
-                        box.id
-                    )
+                        if box.notes:
+                            st.write(f"**Notes:** {box.notes}")
 
-                    st.write(
-                        f"**Positions:** {len(occupied)} occupied, "
-                        f"{len(free)} free"
-                    )
+                        free = storage_service.list_free_positions(box.id)
+                        occupied = storage_service.list_occupied_positions(
+                            box.id
+                        )
 
-                    st.divider()
+                        st.write(
+                            f"**Positions:** {len(occupied)} occupied, "
+                            f"{len(free)} free"
+                        )
 
-                    render_box_grid(box, occupied, key_prefix="browse")
+                        st.divider()
 
-                    st.divider()
+                        render_box_grid(box, occupied, key_prefix="browse")
 
-                    edit_tab, delete_tab = st.tabs(
-                        ["\u270f\ufe0f Edit", "\U0001F5D1\ufe0f Delete"]
-                    )
+                        st.divider()
 
-                    # --- EDIT ---
-                    with edit_tab:
+                        edit_tab, delete_tab = st.tabs(
+                            ["\u270f\ufe0f Edit", "\U0001F5D1\ufe0f Delete"]
+                        )
 
-                        all_rack_options = {
-                            r.id: r.rack_name for r in all_racks
-                        }
+                        # --- EDIT ---
+                        with edit_tab:
 
-                        with st.form(f"edit_box_{box.id}"):
+                            all_rack_options = {
+                                r.id: r.rack_name for r in all_racks
+                            }
 
-                            new_rack_id = st.selectbox(
-                                "Rack",
-                                options=list(all_rack_options.keys()),
-                                format_func=lambda rid: (
-                                    all_rack_options[rid]
-                                ),
-                                index=list(
-                                    all_rack_options.keys()
-                                ).index(box.rack_id)
-                                    if box.rack_id in all_rack_options
-                                    else 0,
-                                key=f"edit_rack_{box.id}",
-                            )
+                            with st.form(f"edit_box_{box.id}"):
 
-                            edit_config = (
-                                storage_service.get_rack_configuration(
-                                    new_rack_id
-                                )
-                            )
-
-                            if edit_config["has_shelf"]:
-                                new_shelf = st.selectbox(
-                                    "Shelf",
-                                    options=edit_config["shelves"],
-                                    index=edit_config["shelves"]
-                                        .index(box.shelf)
-                                        if box.shelf
-                                        in edit_config["shelves"]
+                                new_rack_id = st.selectbox(
+                                    "Rack",
+                                    options=list(all_rack_options.keys()),
+                                    format_func=lambda rid: (
+                                        all_rack_options[rid]
+                                    ),
+                                    index=list(
+                                        all_rack_options.keys()
+                                    ).index(box.rack_id)
+                                        if box.rack_id in all_rack_options
                                         else 0,
-                                    key=f"edit_shelf_{box.id}",
+                                    key=f"edit_rack_{box.id}",
                                 )
-                            else:
-                                new_shelf = None
 
-                            new_slot = st.selectbox(
-                                "Slot",
-                                options=edit_config["slots"],
-                                index=edit_config["slots"]
-                                    .index(box.slot)
-                                    if box.slot in edit_config["slots"]
-                                    else 0,
-                                key=f"edit_slot_{box.id}",
-                            )
-
-                            new_owner = st.text_input(
-                                "Owner",
-                                value=box.owner or "",
-                                key=f"edit_owner_{box.id}",
-                            )
-
-                            new_notes = st.text_area(
-                                "Notes",
-                                value=box.notes or "",
-                                key=f"edit_notes_{box.id}",
-                            )
-
-                            save = st.form_submit_button(
-                                "Save changes"
-                            )
-
-                            if save:
-                                try:
-                                    storage_service.update_box(
-                                        box_id=box.id,
-                                        rack_id=new_rack_id,
-                                        shelf=new_shelf,
-                                        slot=new_slot,
-                                        owner=new_owner,
-                                        notes=new_notes,
+                                edit_config = (
+                                    storage_service.get_rack_configuration(
+                                        new_rack_id
                                     )
+                                )
+
+                                if edit_config["has_shelf"]:
+                                    new_shelf = st.selectbox(
+                                        "Shelf",
+                                        options=edit_config["shelves"],
+                                        index=edit_config["shelves"]
+                                            .index(box.shelf)
+                                            if box.shelf
+                                            in edit_config["shelves"]
+                                            else 0,
+                                        key=f"edit_shelf_{box.id}",
+                                    )
+                                else:
+                                    new_shelf = None
+
+                                new_slot = st.selectbox(
+                                    "Slot",
+                                    options=edit_config["slots"],
+                                    index=edit_config["slots"]
+                                        .index(box.slot)
+                                        if box.slot in edit_config["slots"]
+                                        else 0,
+                                    key=f"edit_slot_{box.id}",
+                                )
+
+                                new_owner = st.text_input(
+                                    "Owner",
+                                    value=box.owner or "",
+                                    key=f"edit_owner_{box.id}",
+                                )
+
+                                new_notes = st.text_area(
+                                    "Notes",
+                                    value=box.notes or "",
+                                    key=f"edit_notes_{box.id}",
+                                )
+
+                                save = st.form_submit_button(
+                                    "Save changes"
+                                )
+
+                                if save:
+                                    try:
+                                        storage_service.update_box(
+                                            box_id=box.id,
+                                            rack_id=new_rack_id,
+                                            shelf=new_shelf,
+                                            slot=new_slot,
+                                            owner=new_owner,
+                                            notes=new_notes,
+                                        )
+                                    except ValueError as e:
+                                        st.error(str(e))
+                                    else:
+                                        st.success("Box updated.")
+                                        st.rerun()
+
+                        # --- DELETE ---
+                        with delete_tab:
+
+                            st.warning(
+                                "A box can only be deleted if all of "
+                                "its positions are free."
+                            )
+
+                            confirm = st.checkbox(
+                                f"I confirm I want to delete "
+                                f"'{box.box_name}'",
+                                key=f"confirm_delete_{box.id}",
+                            )
+
+                            if st.button(
+                                "Delete box",
+                                key=f"delete_{box.id}",
+                                disabled=not confirm,
+                            ):
+                                try:
+                                    storage_service.delete_box(box.id)
                                 except ValueError as e:
                                     st.error(str(e))
                                 else:
-                                    st.success("Box updated.")
+                                    st.success(
+                                        f"Box '{box.box_name}' deleted."
+                                    )
                                     st.rerun()
-
-                    # --- DELETE ---
-                    with delete_tab:
-
-                        st.warning(
-                            "A box can only be deleted if all of "
-                            "its positions are free."
-                        )
-
-                        confirm = st.checkbox(
-                            f"I confirm I want to delete "
-                            f"'{box.box_name}'",
-                            key=f"confirm_delete_{box.id}",
-                        )
-
-                        if st.button(
-                            "Delete box",
-                            key=f"delete_{box.id}",
-                            disabled=not confirm,
-                        ):
-                            try:
-                                storage_service.delete_box(box.id)
-                            except ValueError as e:
-                                st.error(str(e))
-                            else:
-                                st.success(
-                                    f"Box '{box.box_name}' deleted."
-                                )
-                                st.rerun()
 
     # ------------------------------------------------------
     # ASSIGN ITEM (interim)
