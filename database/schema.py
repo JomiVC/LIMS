@@ -37,6 +37,8 @@ def initialize_database() -> None:
     create_dna_stock_table(conn)
     create_protein_expressed_table(conn)
     create_protein_purified_table(conn)
+    ensure_protein_consumption_columns(conn)
+    create_protein_usage_history_table(conn)
     create_reagent_lots_table(conn)
     create_attachments_table(conn)
 
@@ -223,12 +225,23 @@ def create_protein_expressed_table(conn: Connection) -> None:
             -- matches the number of storage_containers rows
             -- created for this record
 
+            used_falcons INTEGER NOT NULL DEFAULT 0,
+            remaining_falcons INTEGER NOT NULL DEFAULT 0,
+
             notes TEXT,
 
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 
         );
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE protein_expressed
+        SET remaining_falcons = total_falcons - used_falcons
+        WHERE remaining_falcons = 0;
         """
     )
 
@@ -263,12 +276,88 @@ def create_protein_purified_table(conn: Connection) -> None:
             -- matches the number of storage_containers rows
             -- created for this record
 
+            used_aliquots INTEGER NOT NULL DEFAULT 0,
+            remaining_aliquots INTEGER NOT NULL DEFAULT 0,
+
             notes TEXT,
 
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 
         );
+        """
+    )
+
+    conn.execute(
+        """
+        UPDATE protein_purified
+        SET remaining_aliquots = total_aliquots - used_aliquots
+        WHERE remaining_aliquots = 0;
+        """
+    )
+
+
+def ensure_protein_consumption_columns(conn: Connection) -> None:
+    """Ensure older databases gain the stock consumption columns."""
+    tables = {
+        "protein_expressed": (
+            ("used_falcons", "INTEGER NOT NULL DEFAULT 0"),
+            ("remaining_falcons", "INTEGER NOT NULL DEFAULT 0"),
+        ),
+        "protein_purified": (
+            ("used_aliquots", "INTEGER NOT NULL DEFAULT 0"),
+            ("remaining_aliquots", "INTEGER NOT NULL DEFAULT 0"),
+        ),
+    }
+
+    for table_name, columns in tables.items():
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+
+        for column_name, column_sql in columns:
+            if column_name not in existing:
+                conn.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql};"
+                )
+
+        if table_name == "protein_expressed":
+            conn.execute(
+                """
+                UPDATE protein_expressed
+                SET remaining_falcons = total_falcons - used_falcons
+                WHERE remaining_falcons IS NULL OR remaining_falcons < 0;
+                """
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE protein_purified
+                SET remaining_aliquots = total_aliquots - used_aliquots
+                WHERE remaining_aliquots IS NULL OR remaining_aliquots < 0;
+                """
+            )
+
+
+def create_protein_usage_history_table(conn: Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS protein_usage_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_table TEXT NOT NULL,
+            owner_id INTEGER NOT NULL,
+            quantity INTEGER NOT NULL,
+            reason TEXT,
+            used_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_usage_history_owner
+        ON protein_usage_history(owner_table, owner_id);
         """
     )
 
@@ -504,6 +593,7 @@ def recreate_database() -> None:
         "dna_stock",
         "protein_expressed",
         "protein_purified",
+        "protein_usage_history",
         "reagent_lots",
         "attachments",
     )

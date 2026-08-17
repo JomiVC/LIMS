@@ -16,6 +16,7 @@ class ProteinService:
 
     def __init__(self):
         self.repository = ProteinRepository()
+        self.repository.ensure_schema()
         self.storage_service = StorageService()
         self.attachment_service = AttachmentService()
 
@@ -41,6 +42,27 @@ class ProteinService:
             "expressed": self.repository.search_expressed(text),
             "purified": self.repository.search_purified(text),
         }
+
+    def consume_expressed(self, record_id: int, quantity: int, reason: str | None = None):
+        return self.repository.consume_expressed(record_id, quantity, reason)
+
+    def consume_purified(self, record_id: int, quantity: int, reason: str | None = None):
+        return self.repository.consume_purified(record_id, quantity, reason)
+
+    def list_usage_history(self, owner_table: str, owner_id: int):
+        return self.repository.list_usage_history(owner_table, owner_id)
+
+    # =====================================================
+    # ATTACHMENTS
+    # =====================================================
+
+    def get_attachments_expressed(self, record_id: int):
+        """Get attachments for an expressed protein record."""
+        return self.attachment_service.list_for("protein_expressed", record_id)
+
+    def get_attachments_purified(self, record_id: int):
+        """Get attachments for a purified protein record."""
+        return self.attachment_service.list_for("protein_purified", record_id)
 
     # =====================================================
     # LOCATION ASSIGNMENT

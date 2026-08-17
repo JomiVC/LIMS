@@ -8,10 +8,13 @@ dedicated repository/service as part of the Proteins module.
 """
 
 from repositories.item_repository import ItemRepository
+from repositories.protein_repository import ProteinRepository
 
 
 CONTAINER_TYPE_LABELS = {
     "DNA": "DNA",
+    "PROTEIN_EXPRESSED": "Expressed protein",
+    "PROTEIN_PURIFIED": "Purified protein",
     "REAGENT_LOT": "Reagent lot",
 }
 
@@ -20,6 +23,7 @@ class ItemService:
 
     def __init__(self):
         self.repository = ItemRepository()
+        self.protein_repository = ProteinRepository()
 
     # =====================================================
     # DNA
@@ -36,6 +40,34 @@ class ItemService:
             raise ValueError("Name cannot be empty.")
 
         return self.repository.create_dna(name=name, notes=notes)
+
+    # =====================================================
+    # PROTEINS
+    # =====================================================
+
+    def list_expressed_proteins(self):
+        """Returns list of expressed proteins in dict format for consistency."""
+        proteins = self.protein_repository.list_expressed()
+        return [
+            {
+                "id": p.id,
+                "name": p.protein_name,
+                "notes": f"Batch: {p.batch_no}, Falcons: {p.total_falcons}"
+            }
+            for p in proteins
+        ]
+
+    def list_purified_proteins(self):
+        """Returns list of purified proteins in dict format for consistency."""
+        proteins = self.protein_repository.list_purified()
+        return [
+            {
+                "id": p.id,
+                "name": p.protein_name,
+                "notes": f"Batch: {p.batch_no}, Aliquots: {p.total_aliquots}"
+            }
+            for p in proteins
+        ]
 
     # =====================================================
     # REAGENT LOTS
@@ -60,11 +92,17 @@ class ItemService:
     def list_items(self, container_type):
         """
         Returns the item list matching container_type
-        ('DNA' | 'REAGENT_LOT').
+        ('DNA' | 'REAGENT_LOT' | 'PROTEIN_EXPRESSED' | 'PROTEIN_PURIFIED').
         """
 
         if container_type == "DNA":
             return self.list_dna()
+
+        if container_type == "PROTEIN_EXPRESSED":
+            return self.list_expressed_proteins()
+
+        if container_type == "PROTEIN_PURIFIED":
+            return self.list_purified_proteins()
 
         if container_type == "REAGENT_LOT":
             return self.list_reagents()
@@ -85,4 +123,13 @@ class ItemService:
         raise ValueError(f"Unknown container_type: {container_type}")
 
     def get_item_name(self, container_type, item_id):
+        """Get item name for any container type."""
+        if container_type == "PROTEIN_EXPRESSED":
+            protein = self.protein_repository.get_expressed(item_id)
+            return protein.protein_name if protein else None
+        
+        if container_type == "PROTEIN_PURIFIED":
+            protein = self.protein_repository.get_purified(item_id)
+            return protein.protein_name if protein else None
+        
         return self.repository.get_item_name(container_type, item_id)

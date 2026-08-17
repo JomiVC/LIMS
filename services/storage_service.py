@@ -13,6 +13,7 @@ from repositories.storage_repository import (
     StorageRepository,
     StorageError,
 )
+from repositories.attachment_repository import AttachmentRepository
 
 
 class StorageService:
@@ -20,6 +21,7 @@ class StorageService:
     def __init__(self):
 
         self.repository = StorageRepository()
+        self.attachment_repository = AttachmentRepository()
 
     # =====================================================
     # RACKS
@@ -345,3 +347,93 @@ class StorageService:
     def delete_container(self, container_id):
 
         self.repository.delete_container(container_id)
+
+    # =====================================================
+    # CONTAINER DETAILS (enriched with item info)
+    # =====================================================
+
+    def get_container_details(self, container_id):
+        """
+        Returns enriched container info including item name and
+        attachments. Useful for displaying in UI modals.
+        """
+        from repositories.protein_repository import ProteinRepository
+        
+        container = self.get_container(container_id)
+        
+        if not container:
+            return None
+        
+        details = {
+            "id": container.id,
+            "container_id": container.id,
+            "label": container.label,
+            "container_type": container.container_type,
+            "item_name": None,
+            "item_id": None,
+            "item_details": {},
+            "attachments": [],
+        }
+        
+        # Map container_type to attribute name and table name
+        type_mapping = {
+            "PROTEIN_EXPRESSED": ("protein_expressed_id", "protein_expressed"),
+            "PROTEIN_PURIFIED": ("protein_purified_id", "protein_purified"),
+            "DNA": ("dna_id", "dna_stock"),
+            "REAGENT_LOT": ("reagent_lot_id", "reagent_lots"),
+        }
+        
+        if container.container_type in type_mapping:
+            attr_name, table_name = type_mapping[container.container_type]
+            item_id = getattr(container, attr_name, None)
+            
+            if item_id:
+                details["item_id"] = item_id
+                
+                # Get item name based on type
+                if container.container_type == "PROTEIN_EXPRESSED":
+                    repo = ProteinRepository()
+                    item = repo.get_expressed(item_id)
+                    details["item_name"] = item.protein_name if item else None
+                    details["item_details"] = {
+                        "🔖 Sample ID": item.sample_id,
+                        "🧬 Protein": item.protein_name,
+                        "🔨 Construct": item.construct or "—",
+                        "🔄 Variant": item.variant or "—",
+                        "🥛 Media": item.media or "—",
+                        "📦 Batch": item.batch_no or "—",
+                        "📊 Vol/Falcon (L)": item.volume_per_falcon_l or "—",
+                        "🧪 Buffer": item.buffer or "—",
+                        "📅 Date Stored": item.date_stored or "—",
+                        "📔 Notebook Ref": item.notebook_ref or "—",
+                        "🔢 Total Falcons": item.total_falcons,
+                        "📝 Notes": item.notes or "—",
+                    } if item else {}
+                    
+                elif container.container_type == "PROTEIN_PURIFIED":
+                    repo = ProteinRepository()
+                    item = repo.get_purified(item_id)
+                    details["item_name"] = item.protein_name if item else None
+                    details["item_details"] = {
+                        "🔖 Sample ID": item.sample_id,
+                        "🧬 Protein": item.protein_name,
+                        "🔨 Construct": item.construct or "—",
+                        "🔄 Variant": item.variant or "—",
+                        "🥛 Media": item.media or "—",
+                        "📦 Batch": item.batch_no or "—",
+                        "📐 Concentration (µM)": item.concentration_um or "—",
+                        "💧 Volume (µL)": item.volume_ul or "—",
+                        "🧪 Buffer": item.buffer or "—",
+                        "📅 Date Stored": item.date_stored or "—",
+                        "📔 Notebook Ref": item.notebook_ref or "—",
+                        "🔢 Total Aliquots": item.total_aliquots,
+                        "📝 Notes": item.notes or "—",
+                    } if item else {}
+                
+                # Get attachments
+                attachments = self.attachment_repository.list_for(
+                    table_name, item_id
+                )
+                details["attachments"] = [dict(att) for att in attachments]
+        
+        return details

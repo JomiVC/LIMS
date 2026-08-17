@@ -16,7 +16,13 @@ own "Expressed proteins" / "Purified proteins" tabs.
 """
 
 import streamlit as st
+import os
+import time
+from pathlib import Path
 
+import pandas as pd
+
+from config import BASE_DIR
 from services.protein_service import ProteinService
 from ui.box_grid import render_box_grid
 
@@ -35,6 +41,153 @@ tab_registro, tab_expressed, tab_purified, tab_proteases = st.tabs(
 
 
 # ==========================================================
+# SHARED: display attachments
+# ==========================================================
+
+def _display_attachments(owner_table, owner_id):
+    """
+    Display attachments for a protein record with download links.
+    """
+    if owner_table == "protein_expressed":
+        attachments = protein_service.get_attachments_expressed(owner_id)
+    else:
+        attachments = protein_service.get_attachments_purified(owner_id)
+    
+    if attachments:
+        st.markdown("**📎 Attachments:**")
+        for att in attachments:
+            # Convert relative path to absolute
+            file_path = BASE_DIR / att["file_path"]
+            if file_path.exists():
+                with open(file_path, "rb") as f:
+                    st.download_button(
+                        label=f"📥 {att['file_name']}",
+                        data=f.read(),
+                        file_name=att['file_name'],
+                        key=f"download_{att['id']}"
+                    )
+            else:
+                st.caption(f"⚠️ {att['file_name']} (file not found at {file_path})")
+
+
+def _protein_row_dict(record, is_expressed=True):
+    """Convert a protein record into a flat row for a dataframe view."""
+    total = record.total_falcons if is_expressed else record.total_aliquots
+    used = record.used_falcons if is_expressed else record.used_aliquots
+    remaining = record.remaining_falcons if is_expressed else record.remaining_aliquots
+
+    row = {
+        "Type": "Expressed protein" if is_expressed else "Purified protein",
+        "Sample ID": record.sample_id,
+        "Protein": record.protein_name,
+        "Construct": record.construct or "—",
+        "Variant": record.variant or "—",
+        "Media": record.media or "—",
+        "Batch": record.batch_no or "—",
+        "Buffer": record.buffer or "—",
+        "Date Stored": record.date_stored or "—",
+        "Notebook Ref": record.notebook_ref or "—",
+        "Total": total,
+        "Used": used,
+        "Remaining": remaining,
+        "Notes": record.notes or "—",
+    }
+
+    if is_expressed:
+        row["Vol/Falcon (L)"] = record.volume_per_falcon_l or "—"
+    else:
+        row["Conc. (µM)"] = record.concentration_um or "—"
+        row["Vol. (µL)"] = record.volume_ul or "—"
+
+    return row
+
+
+def _display_protein_details(record, is_expressed=True):
+    """
+    Display all details of a protein record (expressed or purified).
+    """
+    total = record.total_falcons if is_expressed else record.total_aliquots
+    used = record.used_falcons if is_expressed else record.used_aliquots
+    remaining = record.remaining_falcons if is_expressed else record.remaining_aliquots
+
+    cols = st.columns([2, 1])
+    
+    with cols[0]:
+        st.markdown(f"**{record.sample_id}** — {record.protein_name}")
+        
+    with cols[1]:
+        if is_expressed:
+            st.caption(f"🔵 {remaining} remaining / {total} total")
+        else:
+            st.caption(f"🔵 {remaining} remaining / {total} total")
+    
+    # Display all details in an expandable section
+    with st.expander("📋 View Details", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write(f"**🔨 Construct:** {record.construct or '—'}")
+            st.write(f"**🔄 Variant:** {record.variant or '—'}")
+            st.write(f"**🥛 Media:** {record.media or '—'}")
+            st.write(f"**📦 Batch:** {record.batch_no or '—'}")
+            st.write(f"**🧪 Buffer:** {record.buffer or '—'}")
+            st.write(f"**📅 Date Stored:** {record.date_stored or '—'}")
+        
+        with col2:
+            st.write(f"**📔 Notebook Ref:** {record.notebook_ref or '—'}")
+            if is_expressed:
+                st.write(f"**📊 Vol/Falcon (L):** {record.volume_per_falcon_l or '—'}")
+            else:
+                st.write(f"**📐 Concentration (µM):** {record.concentration_um or '—'}")
+                st.write(f"**💧 Volume (µL):** {record.volume_ul or '—'}")
+            st.write(f"**🔢 Total:** {total}")
+            st.write(f"**🧮 Used:** {used}")
+            st.write(f"**📦 Remaining:** {remaining}")
+        
+        if record.notes:
+            st.write(f"**📝 Notes:** {record.notes}")
+
+        st.divider()
+        st.markdown("**🧪 Consumption / Use aliquot**")
+        consume_prefix = f"{('exp' if is_expressed else 'pur')}_{record.id}_{record.sample_id.replace('-', '_')}"
+        qty = st.number_input(
+            "Qty to use",
+            min_value=1,
+            max_value=remaining if remaining > 0 else 1,
+            step=1,
+            value=1,
+            key=f"{consume_prefix}_qty",
+        )
+
+        if st.button("Use aliquot", key=f"{consume_prefix}_btn"):
+            try:
+                if is_expressed:
+                    protein_service.consume_expressed(record.id, int(qty), reason="manual use")
+                else:
+                    protein_service.consume_purified(record.id, int(qty), reason="manual use")
+                st.success(f"✅ {qty} aliquot(s) used.")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+        history = protein_service.list_usage_history(
+            "protein_expressed" if is_expressed else "protein_purified",
+            record.id,
+        )
+        if history:
+            st.divider()
+            st.markdown("**🕘 Usage history:**")
+            for event in history[:5]:
+                st.write(f"• {event['used_at'][:19]} — {event['quantity']} used ({event['reason']})")
+        
+        st.divider()
+        _display_attachments(
+            "protein_expressed" if is_expressed else "protein_purified",
+            record.id
+        )
+
+
+# ==========================================================
 # REGISTRO (global search)
 # ==========================================================
 
@@ -50,17 +203,43 @@ with tab_registro:
             st.info("No matching records found.")
 
         else:
-            for record in results["expressed"]:
-                st.markdown(
-                    f"**{record.sample_id}** — {record.protein_name} "
-                    f"(Expressed, {record.total_falcons} Falcons)"
+            filter_type = st.selectbox(
+                "Filter by type",
+                options=["All", "Expressed", "Purified"],
+                key="protein_global_filter",
+            )
+
+            rows = []
+            records = []
+            if results["expressed"]:
+                for record in results["expressed"]:
+                    if filter_type in ("All", "Expressed"):
+                        rows.append(_protein_row_dict(record, is_expressed=True))
+                        records.append((True, record))
+
+            if results["purified"]:
+                for record in results["purified"]:
+                    if filter_type in ("All", "Purified"):
+                        rows.append(_protein_row_dict(record, is_expressed=False))
+                        records.append((False, record))
+
+            if not rows:
+                st.info("No records match the selected filter.")
+            else:
+                df = pd.DataFrame(rows)
+                selected = st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    selection_mode="single-row",
+                    on_select="rerun",
+                    key="protein_global_table",
                 )
 
-            for record in results["purified"]:
-                st.markdown(
-                    f"**{record.sample_id}** — {record.protein_name} "
-                    f"(Purified, {record.total_aliquots} Aliquots)"
-                )
+                if selected and selected.selection.rows:
+                    record_tuple = records[selected.selection.rows[0]]
+                    st.divider()
+                    _display_protein_details(record_tuple[1], is_expressed=record_tuple[0])
 
 
 # ==========================================================
@@ -135,21 +314,32 @@ with tab_expressed:
 
     if query:
         st.subheader("Search results")
-
-        for record in protein_service.search_expressed(query):
-            st.markdown(
-                f"**{record.sample_id}** — {record.protein_name} "
-                f"({record.total_falcons} Falcons)"
+        records = protein_service.search_expressed(query)
+        if records:
+            df = pd.DataFrame([
+                _protein_row_dict(record, is_expressed=True)
+                for record in records
+            ])
+            selected = st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                selection_mode="single-row",
+                on_select="rerun",
+                key="expressed_table",
             )
-
-        st.divider()
+            if selected and selected.selection.rows:
+                st.divider()
+                _display_protein_details(records[selected.selection.rows[0]], is_expressed=True)
+        else:
+            st.info("No matching expressed proteins found.")
 
     st.subheader("Register new")
 
     protein_name = st.text_input("Protein Name", key="exp_protein_name")
     construct = st.text_input("Construct", key="exp_construct")
     variant = st.text_input("Variant", key="exp_variant")
-    media = st.text_input("Media", key="exp_media")
+    media = st.selectbox("Media", options=["LB", "15N", "15N13C"], key="exp_media")
     batch_no = st.text_input("Batch No.", key="exp_batch_no")
     volume_per_falcon_l = st.number_input(
         "Vol./Falcon (L)", min_value=0.0, step=0.1, key="exp_vol"
@@ -203,8 +393,13 @@ with tab_expressed:
             except ValueError as e:
                 st.error(str(e))
             else:
-                st.success(f"Registered as {sample_id}.")
+                st.success(f"✅ Registered as {sample_id}.")
+                if uploaded_files:
+                    st.info(f"📎 {len(uploaded_files)} file(s) attached and saved.")
+                    with st.expander("View attached files"):
+                        _display_attachments("protein_expressed", record_id)
                 st.session_state.pop("exp_loc_start_position", None)
+                time.sleep(1.5)
                 st.rerun()
 
 
@@ -216,21 +411,32 @@ with tab_purified:
 
     if query:
         st.subheader("Search results")
-
-        for record in protein_service.search_purified(query):
-            st.markdown(
-                f"**{record.sample_id}** — {record.protein_name} "
-                f"({record.total_aliquots} Aliquots)"
+        records = protein_service.search_purified(query)
+        if records:
+            df = pd.DataFrame([
+                _protein_row_dict(record, is_expressed=False)
+                for record in records
+            ])
+            selected = st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                selection_mode="single-row",
+                on_select="rerun",
+                key="purified_table",
             )
-
-        st.divider()
+            if selected and selected.selection.rows:
+                st.divider()
+                _display_protein_details(records[selected.selection.rows[0]], is_expressed=False)
+        else:
+            st.info("No matching purified proteins found.")
 
     st.subheader("Register new")
 
     p_protein_name = st.text_input("Protein Name", key="pur_protein_name")
     p_construct = st.text_input("Construct", key="pur_construct")
     p_variant = st.text_input("Variant", key="pur_variant")
-    p_media = st.text_input("Media", key="pur_media")
+    p_media = st.selectbox("Media", options=["LB", "15N", "15N13C"], key="pur_media")
     p_batch_no = st.text_input("Batch No.", key="pur_batch_no")
     p_conc = st.number_input(
         "Conc. (µM)", min_value=0.0, step=0.1, key="pur_conc"
@@ -288,8 +494,13 @@ with tab_purified:
             except ValueError as e:
                 st.error(str(e))
             else:
-                st.success(f"Registered as {sample_id}.")
+                st.success(f"✅ Registered as {sample_id}.")
+                if p_uploaded_files:
+                    st.info(f"📎 {len(p_uploaded_files)} file(s) attached and saved.")
+                    with st.expander("View attached files"):
+                        _display_attachments("protein_purified", record_id)
                 st.session_state.pop("pur_loc_start_position", None)
+                time.sleep(1.5)
                 st.rerun()
 
 

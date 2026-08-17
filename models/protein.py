@@ -31,12 +31,17 @@ class ProteinExpressed:
     date_stored: Optional[str]
     notebook_ref: Optional[str]
     total_falcons: int
+    used_falcons: int = 0
+    remaining_falcons: int = 0
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ProteinExpressed":
+        used_falcons = row["used_falcons"] if "used_falcons" in row.keys() else 0
+        remaining_falcons = row["remaining_falcons"] if "remaining_falcons" in row.keys() else max(row["total_falcons"] - used_falcons, 0)
+
         return cls(
             id=row["id"],
             sample_id=row["sample_id"],
@@ -50,6 +55,8 @@ class ProteinExpressed:
             date_stored=row["date_stored"],
             notebook_ref=row["notebook_ref"],
             total_falcons=row["total_falcons"],
+            used_falcons=used_falcons,
+            remaining_falcons=remaining_falcons,
             notes=row["notes"],
             created_at=_parse_dt(row["created_at"]),
             updated_at=_parse_dt(row["updated_at"]),
@@ -72,12 +79,17 @@ class ProteinPurified:
     date_stored: Optional[str]
     notebook_ref: Optional[str]
     total_aliquots: int
+    used_aliquots: int = 0
+    remaining_aliquots: int = 0
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> "ProteinPurified":
+        used_aliquots = row["used_aliquots"] if "used_aliquots" in row.keys() else 0
+        remaining_aliquots = row["remaining_aliquots"] if "remaining_aliquots" in row.keys() else max(row["total_aliquots"] - used_aliquots, 0)
+
         return cls(
             id=row["id"],
             sample_id=row["sample_id"],
@@ -92,6 +104,8 @@ class ProteinPurified:
             date_stored=row["date_stored"],
             notebook_ref=row["notebook_ref"],
             total_aliquots=row["total_aliquots"],
+            used_aliquots=used_aliquots,
+            remaining_aliquots=remaining_aliquots,
             notes=row["notes"],
             created_at=_parse_dt(row["created_at"]),
             updated_at=_parse_dt(row["updated_at"]),

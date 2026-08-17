@@ -8,10 +8,16 @@ import sqlite3
 from contextlib import contextmanager
 
 from database.connection import get_connection
+from database.schema import ensure_protein_consumption_columns, create_protein_usage_history_table
 from models.protein import ProteinExpressed, ProteinPurified
 
 
 class ProteinRepository:
+
+    def ensure_schema(self):
+        with self._conn() as conn:
+            ensure_protein_consumption_columns(conn)
+            create_protein_usage_history_table(conn)
 
     @contextmanager
     def _conn(self):
@@ -86,14 +92,16 @@ class ProteinRepository:
                 (
                     sample_id, protein_name, construct, variant,
                     media, batch_no, volume_per_falcon_l, buffer,
-                    date_stored, notebook_ref, total_falcons, notes
+                    date_stored, notebook_ref, total_falcons,
+                    used_falcons, remaining_falcons, notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sample_id, protein_name, construct, variant,
                     media, batch_no, volume_per_falcon_l, buffer,
-                    date_stored, notebook_ref, total_falcons, notes,
+                    date_stored, notebook_ref, total_falcons,
+                    0, total_falcons, notes,
                 )
             )
 
@@ -165,15 +173,15 @@ class ProteinRepository:
                     sample_id, protein_name, construct, variant,
                     media, batch_no, concentration_um, volume_ul,
                     buffer, date_stored, notebook_ref,
-                    total_aliquots, notes
+                    total_aliquots, used_aliquots, remaining_aliquots, notes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     sample_id, protein_name, construct, variant,
                     media, batch_no, concentration_um, volume_ul,
                     buffer, date_stored, notebook_ref,
-                    total_aliquots, notes,
+                    total_aliquots, 0, total_aliquots, notes,
                 )
             )
 
@@ -211,3 +219,89 @@ class ProteinRepository:
             ).fetchall()
 
         return [ProteinPurified.from_row(r) for r in rows]
+
+    # =====================================================
+    # USAGE TRACKING
+    # =====================================================
+
+    def consume_expressed(self, record_id: int, quantity: int, reason: str | None = None) -> None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT total_falcons, used_falcons, remaining_falcons FROM protein_expressed WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+
+            if row is None:
+                raise ValueError("Expressed protein record not found.")
+
+            available = max(int(row["total_falcons"]) - int(row["used_falcons"]), 0)
+            if quantity < 1:
+                raise ValueError("Quantity to use must be at least 1.")
+            if quantity > available:
+                raise ValueError(f"Only {available} falcon(s) available to use.")
+
+            new_used = int(row["used_falcons"]) + quantity
+            new_remaining = int(row["total_falcons"]) - new_used
+
+            conn.execute(
+                """
+                UPDATE protein_expressed
+                SET used_falcons = ?, remaining_falcons = ?, updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (new_used, new_remaining, record_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO protein_usage_history (owner_table, owner_id, quantity, reason)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("protein_expressed", record_id, quantity, reason or "manual usage"),
+            )
+
+    def consume_purified(self, record_id: int, quantity: int, reason: str | None = None) -> None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT total_aliquots, used_aliquots, remaining_aliquots FROM protein_purified WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+
+            if row is None:
+                raise ValueError("Purified protein record not found.")
+
+            available = max(int(row["total_aliquots"]) - int(row["used_aliquots"]), 0)
+            if quantity < 1:
+                raise ValueError("Quantity to use must be at least 1.")
+            if quantity > available:
+                raise ValueError(f"Only {available} aliquot(s) available to use.")
+
+            new_used = int(row["used_aliquots"]) + quantity
+            new_remaining = int(row["total_aliquots"]) - new_used
+
+            conn.execute(
+                """
+                UPDATE protein_purified
+                SET used_aliquots = ?, remaining_aliquots = ?, updated_at = datetime('now')
+                WHERE id = ?
+                """,
+                (new_used, new_remaining, record_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO protein_usage_history (owner_table, owner_id, quantity, reason)
+                VALUES (?, ?, ?, ?)
+                """,
+                ("protein_purified", record_id, quantity, reason or "manual usage"),
+            )
+
+    def list_usage_history(self, owner_table: str, owner_id: int):
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM protein_usage_history
+                WHERE owner_table = ? AND owner_id = ?
+                ORDER BY used_at DESC
+                """,
+                (owner_table, owner_id),
+            ).fetchall()
+        return [dict(r) for r in rows]

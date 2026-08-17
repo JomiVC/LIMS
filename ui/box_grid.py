@@ -9,7 +9,7 @@ to assign an item to).
 import streamlit as st
 
 
-def render_box_grid(box, occupied_positions, selectable=False, key_prefix=""):
+def render_box_grid(box, occupied_positions, selectable=False, key_prefix="", enriched_data=None):
     """
     Renders the physical grid of a box.
 
@@ -20,6 +20,10 @@ def render_box_grid(box, occupied_positions, selectable=False, key_prefix=""):
     its label (e.g. "A1") for that rerun. Occupied (🔵) positions
     are always disabled, selectable or not -- you assign an item to
     a free slot, not to one that's already taken.
+    
+    If `enriched_data` is provided, occupied buttons will show item
+    names in help text and store container_id in session_state when
+    clicked for viewing details.
 
     Returns the clicked free position's label, or None if nothing
     was clicked this rerun.
@@ -40,6 +44,14 @@ def render_box_grid(box, occupied_positions, selectable=False, key_prefix=""):
     else:
         st.warning(f"Unknown geometry for box '{box.box_name}'.")
         return None
+
+    # Build enriched data map by container_id
+    enriched_map = {}
+    if enriched_data:
+        for data in enriched_data:
+            container_id = data.get("container_id")
+            if container_id:
+                enriched_map[container_id] = data
 
     # ------------------------------------------------------
     # OCCUPIED POSITIONS
@@ -91,14 +103,27 @@ def render_box_grid(box, occupied_positions, selectable=False, key_prefix=""):
 
                     item = occupied[position]
                     label = item.get("label") or "Occupied"
+                    container_id = item.get("container_id")
+                    
+                    # Build help text with item name if available
+                    help_text = f"{position} — {label}"
+                    if enriched_data and container_id in enriched_map:
+                        enriched = enriched_map[container_id]
+                        item_name = enriched.get("item_name", "Unknown")
+                        help_text = f"{position} — {label}\n({item_name})"
 
-                    st.button(
+                    clicked = st.button(
                         f"🔵 {position}",
                         key=f"{key_prefix}_occupied_{box.id}_{position}",
-                        help=f"{position} — {label}",
+                        help=help_text,
                         use_container_width=True,
-                        disabled=True,
                     )
+                    
+                    # If enriched data is available and button is clicked,
+                    # store container info and trigger rerun to show modal
+                    if clicked and enriched_data and container_id in enriched_map:
+                        st.session_state[f"{key_prefix}_selected_container"] = enriched_map[container_id]
+                        st.rerun()
 
                 else:
 

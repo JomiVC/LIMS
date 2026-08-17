@@ -20,9 +20,14 @@ Structure:
 
 import streamlit as st
 from collections import defaultdict
+from pathlib import Path
 
+import pandas as pd
+
+from config import BASE_DIR
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
+from services.protein_service import ProteinService
 from ui.box_grid import render_box_grid
 from ui.rack_grid import (
     render_rack_grid,
@@ -40,13 +45,148 @@ st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
 # the marker left by the previously active page isn't "storage").
 if st.session_state.get("_active_page_marker") != "storage":
     clear_active_selection("browse")
+    # Also clear container selection when navigating to this page
+    st.session_state.pop("browse_selected_container", None)
 
 st.session_state["_active_page_marker"] = "storage"
 
 storage_service = StorageService()
 item_service = ItemService()
+protein_service = ProteinService()
 
 st.title("📦 Storage")
+
+
+def _protein_table_row(container_type, protein_record, location_text):
+    """Return a flat row with all protein record fields for tabular search."""
+    if container_type == "PROTEIN_EXPRESSED":
+        row = {
+            "Type": "Expressed protein",
+            "Sample ID": protein_record.sample_id,
+            "Protein": protein_record.protein_name,
+            "Construct": protein_record.construct or "—",
+            "Variant": protein_record.variant or "—",
+            "Media": protein_record.media or "—",
+            "Batch": protein_record.batch_no or "—",
+            "Bolume/Falcon (L)": protein_record.volume_per_falcon_l or "—",
+            "Buffer": protein_record.buffer or "—",
+            "Date Stored": protein_record.date_stored or "—",
+            "Notebook Ref": protein_record.notebook_ref or "—",
+            "Total": protein_record.total_falcons,
+            "Used": protein_record.used_falcons,
+            "Remaining": protein_record.remaining_falcons,
+            "Notes": protein_record.notes or "—",
+            "Location": location_text,
+        }
+    else:
+        row = {
+            "Type": "Purified protein",
+            "Sample ID": protein_record.sample_id,
+            "Protein": protein_record.protein_name,
+            "Construct": protein_record.construct or "—",
+            "Variant": protein_record.variant or "—",
+            "Media": protein_record.media or "—",
+            "Batch": protein_record.batch_no or "—",
+            "Conc. (µM)": protein_record.concentration_um or "—",
+            "Vol. (µL)": protein_record.volume_ul or "—",
+            "Buffer": protein_record.buffer or "—",
+            "Date Stored": protein_record.date_stored or "—",
+            "Notebook Ref": protein_record.notebook_ref or "—",
+            "Total": protein_record.total_aliquots,
+            "Used": protein_record.used_aliquots,
+            "Remaining": protein_record.remaining_aliquots,
+            "Notes": protein_record.notes or "—",
+            "Location": location_text,
+        }
+    return row
+
+
+def _show_container_details(container_details):
+    """
+    Display detailed info about a container and its attachments.
+    (Shown inline within the box dialog, not in a nested modal)
+    """
+    st.subheader(f"📋 Sample: {container_details['label']}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write(f"**Label:** {container_details['label']}")
+        st.write(f"**Type:** {container_details['container_type']}")
+
+    with col2:
+        if container_details['item_name']:
+            st.write(f"**Item:** {container_details['item_name']}")
+
+    if container_details['item_details']:
+        st.divider()
+        st.markdown("**📊 Item Details:**")
+        for key, value in container_details['item_details'].items():
+            st.write(f"• **{key}:** {value}")
+
+    if container_details["container_type"] in {"PROTEIN_EXPRESSED", "PROTEIN_PURIFIED"}:
+        item_id = container_details.get("item_id")
+        owner_table = container_details["container_type"].lower().replace("protein_", "protein_")
+        # Normalize table names to the actual schema names used by the application.
+        owner_table = "protein_expressed" if container_details["container_type"] == "PROTEIN_EXPRESSED" else "protein_purified"
+
+        if item_id:
+            item_record = protein_service.repository.get_expressed(item_id) if owner_table == "protein_expressed" else protein_service.repository.get_purified(item_id)
+            if item_record:
+                remaining = item_record.remaining_falcons if owner_table == "protein_expressed" else item_record.remaining_aliquots
+                total = item_record.total_falcons if owner_table == "protein_expressed" else item_record.total_aliquots
+                used = item_record.used_falcons if owner_table == "protein_expressed" else item_record.used_aliquots
+
+                st.divider()
+                st.markdown("**🧪 Use aliquot**")
+                qty = st.number_input(
+                    "Qty to use",
+                    min_value=1,
+                    max_value=remaining if remaining > 0 else 1,
+                    step=1,
+                    value=1,
+                    key=f"storage_use_{container_details['container_id']}",
+                )
+                if st.button("Use aliquot", key=f"storage_use_btn_{container_details['container_id']}"):
+                    try:
+                        if owner_table == "protein_expressed":
+                            protein_service.consume_expressed(item_id, int(qty), reason="manual use")
+                        else:
+                            protein_service.consume_purified(item_id, int(qty), reason="manual use")
+                        st.success(f"✅ {qty} aliquot(s) used.")
+                        st.rerun()
+                    except ValueError as e:
+                        st.error(str(e))
+
+                st.write(f"**🧮 Used:** {used}")
+                st.write(f"**📦 Remaining:** {remaining} / {total}")
+
+                history = protein_service.list_usage_history(owner_table, item_id)
+                if history:
+                    st.divider()
+                    st.markdown("**🕘 Usage history:**")
+                    for event in history[:5]:
+                        st.write(f"• {event['used_at'][:19]} — {event['quantity']} used ({event['reason']})")
+
+    # Show attachments
+    if container_details['attachments']:
+        st.divider()
+        st.markdown("**📎 Attachments:**")
+        for att in container_details['attachments']:
+            # Convert relative path to absolute
+            file_path = BASE_DIR / att["file_path"]
+            if file_path.exists():
+                with open(file_path, "rb") as f:
+                    st.download_button(
+                        label=f"📥 {att['file_name']}",
+                        data=f.read(),
+                        file_name=att['file_name'],
+                        key=f"download_att_{att['id']}"
+                    )
+            else:
+                st.caption(f"⚠️ {att['file_name']} (file not found at {file_path})")
+    else:
+        st.divider()
+        st.caption("No attachments for this sample.")
 
 
 def show_box_dialog(box, all_racks):
@@ -75,7 +215,26 @@ def show_box_dialog(box, all_racks):
 
         st.divider()
 
-        render_box_grid(box, occupied, key_prefix="browse")
+        # Enrich occupied positions with item details
+        enriched_data = []
+        for occ in occupied:
+            container_id = occ.get("container_id")
+            if container_id:
+                details = storage_service.get_container_details(container_id)
+                if details:
+                    enriched_data.append(details)
+
+        render_box_grid(box, occupied, key_prefix="browse", enriched_data=enriched_data)
+        
+        # Check if a container was clicked and show its details inline
+        selected_container = st.session_state.get("browse_selected_container")
+        
+        if selected_container:
+            st.divider()
+            # Show the detail section inline within the dialog
+            _show_container_details(selected_container)
+            # Clear the selection so it doesn't reopen
+            st.session_state.pop("browse_selected_container", None)
 
         st.divider()
 
@@ -207,42 +366,81 @@ with tab_samples:
     if query:
 
         query_lower = query.strip().lower()
-        results = []
+        table_rows = []
 
         for container_type in CONTAINER_TYPE_LABELS:
+            if container_type == "PROTEIN_EXPRESSED":
+                for record in protein_service.repository.search_expressed(query):
+                    location = storage_service.get_container_for_item(
+                        container_type, record.id
+                    )
+                    location_text = (
+                        f"{location['rack_name']} / {location['box_name']} "
+                        f"/ {location['position']}"
+                        if location
+                        else "Not yet assigned to a location"
+                    )
+                    table_rows.append(
+                        _protein_table_row(container_type, record, location_text)
+                    )
 
-            for row in item_service.list_items(container_type):
+            elif container_type == "PROTEIN_PURIFIED":
+                for record in protein_service.repository.search_purified(query):
+                    location = storage_service.get_container_for_item(
+                        container_type, record.id
+                    )
+                    location_text = (
+                        f"{location['rack_name']} / {location['box_name']} "
+                        f"/ {location['position']}"
+                        if location
+                        else "Not yet assigned to a location"
+                    )
+                    table_rows.append(
+                        _protein_table_row(container_type, record, location_text)
+                    )
 
-                if query_lower in row["name"].lower():
-                    results.append((container_type, row))
+            else:
+                for row in item_service.list_items(container_type):
+                    if query_lower in row["name"].lower():
+                        location = storage_service.get_container_for_item(
+                            container_type, row["id"]
+                        )
+                        location_text = (
+                            f"{location['rack_name']} / {location['box_name']} "
+                            f"/ {location['position']}"
+                            if location
+                            else "Not yet assigned to a location"
+                        )
+                        table_rows.append({
+                            "Type": CONTAINER_TYPE_LABELS[container_type],
+                            "Sample ID": "—",
+                            "Protein": row["name"],
+                            "Construct": "—",
+                            "Variant": "—",
+                            "Media": "—",
+                            "Batch": "—",
+                            "Bolume/Falcon (L)": "—",
+                            "Conc. (µM)": "—",
+                            "Vol. (µL)": "—",
+                            "Buffer": "—",
+                            "Date Stored": "—",
+                            "Notebook Ref": "—",
+                            "Total": "—",
+                            "Used": "—",
+                            "Remaining": "—",
+                            "Notes": row.get("notes") or "—",
+                            "Location": location_text,
+                        })
 
-        if not results:
+        if not table_rows:
             st.info("No matching samples found.")
 
         else:
-            for container_type, row in results:
-
-                location = storage_service.get_container_for_item(
-                    container_type, row["id"]
-                )
-
-                location_text = (
-                    f"{location['rack_name']} / {location['box_name']} "
-                    f"/ {location['position']}"
-                    if location
-                    else "Not yet assigned to a location"
-                )
-
-                st.markdown(
-                    f"**{row['name']}** "
-                    f"({CONTAINER_TYPE_LABELS[container_type]})"
-                )
-                st.caption(location_text)
-
-                if row["notes"]:
-                    st.caption(f"Notes: {row['notes']}")
-
-                st.divider()
+            st.dataframe(
+                pd.DataFrame(table_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     else:
         st.caption(
