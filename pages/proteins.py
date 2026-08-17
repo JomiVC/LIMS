@@ -16,18 +16,18 @@ own "Expressed proteins" / "Purified proteins" tabs.
 """
 
 import streamlit as st
-import os
 import time
-from pathlib import Path
 
 import pandas as pd
 
-from config import BASE_DIR
 from services.protein_service import ProteinService
+from ui.attachments import render_attachments
 from ui.box_grid import render_box_grid
 
 
 st.set_page_config(page_title="LIMS - Proteins", page_icon="🧫")
+
+st.session_state["_active_page_marker"] = "proteins"
 
 protein_service = ProteinService()
 
@@ -35,8 +35,8 @@ st.title("🧫 Proteins")
 
 query = st.text_input("Search", key="proteins_search_query")
 
-tab_registro, tab_expressed, tab_purified, tab_proteases = st.tabs(
-    ["Registro", "Expressed proteins", "Purified proteins", "Proteases"]
+tab_registro, tab_expressed, tab_purified, tab_history, tab_proteases = st.tabs(
+    ["Registro", "Expressed proteins", "Purified proteins", "Usage history", "Proteases"]
 )
 
 
@@ -52,6 +52,11 @@ def _display_attachments(owner_table, owner_id):
         attachments = protein_service.get_attachments_expressed(owner_id)
     else:
         attachments = protein_service.get_attachments_purified(owner_id)
+
+    render_attachments(
+        attachments, key_prefix=f"protein_{owner_table}_{owner_id}"
+    )
+    return
     
     if attachments:
         st.markdown("**📎 Attachments:**")
@@ -141,6 +146,41 @@ def _display_selected_protein_actions(record, is_expressed=True):
                 st.error(str(e))
 
         st.caption(f"Total: {total} | Used: {used} | Remaining: {remaining}")
+
+
+def _display_protein_selection_table(records, is_expressed, table_key):
+    """Render the shared selectable protein table and row actions."""
+    rows = []
+    item_type = "PROTEIN_EXPRESSED" if is_expressed else "PROTEIN_PURIFIED"
+
+    for record in records:
+        location = protein_service.storage_service.get_container_for_item(
+            item_type, record.id
+        )
+        location_text = (
+            f"{location['rack_name']} / {location['box_name']} / {location['position']}"
+            if location else "Not yet assigned to a location"
+        )
+        rows.append(
+            _protein_row_dict(
+                record, is_expressed=is_expressed, location_text=location_text
+            )
+        )
+
+    selected = st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True,
+        selection_mode="single-row",
+        on_select="rerun",
+        key=table_key,
+    )
+
+    if selected and selected.selection.rows:
+        record = records[selected.selection.rows[0]]
+        st.divider()
+        st.subheader(f"{record.sample_id} â€” {record.protein_name}")
+        _display_selected_protein_actions(record, is_expressed=is_expressed)
 
 
 def _display_protein_details(record, is_expressed=True):
@@ -361,27 +401,17 @@ def _location_picker(box_type, count, key_prefix):
 
 with tab_expressed:
 
-    if query:
-        st.subheader("Search results")
-        records = protein_service.search_expressed(query)
-        if records:
-            df = pd.DataFrame([
-                _protein_row_dict(record, is_expressed=True)
-                for record in records
-            ])
-            selected = st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                selection_mode="single-row",
-                on_select="rerun",
-                key="expressed_table",
-            )
-            if selected and selected.selection.rows:
-                st.divider()
-                _display_protein_details(records[selected.selection.rows[0]], is_expressed=True)
-        else:
-            st.info("No matching expressed proteins found.")
+    st.subheader("Search results" if query else "Records")
+    records = (
+        protein_service.search_expressed(query)
+        if query else protein_service.list_expressed()
+    )
+    if records:
+        _display_protein_selection_table(
+            records, is_expressed=True, table_key="expressed_table"
+        )
+    else:
+        st.info("No matching expressed proteins found." if query else "No expressed proteins found.")
 
     st.subheader("Register new")
 
@@ -458,27 +488,17 @@ with tab_expressed:
 
 with tab_purified:
 
-    if query:
-        st.subheader("Search results")
-        records = protein_service.search_purified(query)
-        if records:
-            df = pd.DataFrame([
-                _protein_row_dict(record, is_expressed=False)
-                for record in records
-            ])
-            selected = st.dataframe(
-                df,
-                use_container_width=True,
-                hide_index=True,
-                selection_mode="single-row",
-                on_select="rerun",
-                key="purified_table",
-            )
-            if selected and selected.selection.rows:
-                st.divider()
-                _display_protein_details(records[selected.selection.rows[0]], is_expressed=False)
-        else:
-            st.info("No matching purified proteins found.")
+    st.subheader("Search results" if query else "Records")
+    records = (
+        protein_service.search_purified(query)
+        if query else protein_service.list_purified()
+    )
+    if records:
+        _display_protein_selection_table(
+            records, is_expressed=False, table_key="purified_table"
+        )
+    else:
+        st.info("No matching purified proteins found." if query else "No purified proteins found.")
 
     st.subheader("Register new")
 
@@ -551,6 +571,41 @@ with tab_purified:
                 st.session_state.pop("pur_loc_start_position", None)
                 time.sleep(1.5)
                 st.rerun()
+
+
+# ==========================================================
+# USAGE HISTORY
+# ==========================================================
+
+with tab_history:
+
+    history_query = st.text_input(
+        "Search usage history",
+        placeholder="Sample ID, protein, type, or reason",
+        key="protein_usage_history_search",
+    )
+    history = protein_service.search_usage_history(history_query)
+
+    if history:
+        history_df = pd.DataFrame(history).rename(
+            columns={
+                "type": "Type",
+                "sample_id": "Sample ID",
+                "protein_name": "Protein",
+                "quantity": "Quantity used",
+                "reason": "Reason",
+                "used_at": "Used at",
+            }
+        )
+        st.dataframe(
+            history_df[
+                ["Type", "Sample ID", "Protein", "Quantity used", "Reason", "Used at"]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("No usage records match the search.")
 
 
 # ==========================================================

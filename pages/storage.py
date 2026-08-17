@@ -28,6 +28,7 @@ from config import BASE_DIR
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from services.protein_service import ProteinService
+from ui.attachments import render_attachments
 from ui.box_grid import render_box_grid
 from ui.rack_grid import (
     render_rack_grid,
@@ -38,16 +39,12 @@ from ui.rack_grid import (
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
 
-# Streamlit's session_state persists across page navigation, so a
-# leftover "active" grid selection from a previous visit would
-# reopen the box dialog immediately on arrival. Reset it only when
-# we detect we've just navigated here from a different page (i.e.
-# the marker left by the previously active page isn't "storage").
-# Always reset stale browse state on page entry so the previous box
-# does not reopen unexpectedly. User-triggered selection is set only
-# after the next interaction, so this does not interfere with normal use.
-clear_active_selection("browse")
-st.session_state.pop("browse_selected_container", None)
+# Streamlit reruns this script after every interaction. Clear stale
+# selections only when arriving from another page; clearing them on every
+# rerun would discard the box selection before its dialog can be rendered.
+if st.session_state.get("_active_page_marker") != "storage":
+    clear_active_selection("browse")
+    st.session_state.pop("browse_selected_container", None)
 
 st.session_state["_active_page_marker"] = "storage"
 
@@ -119,6 +116,11 @@ def _display_storage_record_actions(record, container_type):
 
     if action == "View attachments":
         attachments = protein_service.get_attachments_expressed(record.id) if owner_table == "protein_expressed" else protein_service.get_attachments_purified(record.id)
+        render_attachments(
+            attachments,
+            key_prefix=f"storage_row_{container_type}_{record.id}",
+        )
+        return
         if attachments:
             st.markdown("**📎 Attachments:**")
             for att in attachments:
@@ -191,6 +193,11 @@ def _show_container_details(container_details):
     )
 
     if action == "View attachments":
+        render_attachments(
+            container_details["attachments"],
+            key_prefix=f"storage_container_{container_details['container_id']}",
+        )
+        return
         if container_details['attachments']:
             st.divider()
             st.markdown("**📎 Attachments:**")

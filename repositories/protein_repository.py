@@ -18,6 +18,23 @@ class ProteinRepository:
         with self._conn() as conn:
             ensure_protein_consumption_columns(conn)
             create_protein_usage_history_table(conn)
+            # Legacy records predate the remaining-* counters. Their default
+            # value was zero even though no aliquots had been used.
+            conn.execute(
+                """
+                UPDATE protein_expressed
+                SET remaining_falcons = total_falcons
+                WHERE used_falcons = 0 AND remaining_falcons = 0
+                """
+            )
+            conn.execute(
+                """
+                UPDATE protein_purified
+                SET remaining_aliquots = total_aliquots
+                WHERE used_aliquots = 0 AND remaining_aliquots = 0
+                """
+            )
+            self._reconcile_storage_containers(conn)
 
     @contextmanager
     def _conn(self):
@@ -224,6 +241,62 @@ class ProteinRepository:
     # USAGE TRACKING
     # =====================================================
 
+    @staticmethod
+    def _release_storage_containers(
+        conn: sqlite3.Connection,
+        item_column: str,
+        record_id: int,
+        quantity: int,
+    ) -> None:
+        """Free one physical storage position for each consumed aliquot."""
+        container_rows = conn.execute(
+            f"""
+            SELECT c.id
+            FROM storage_containers c
+            JOIN storage_positions p ON p.id = c.position_id
+            WHERE c.{item_column} = ?
+            ORDER BY p.box_id, p.position, c.id
+            LIMIT ?
+            """,
+            (record_id, quantity),
+        ).fetchall()
+
+        if container_rows:
+            conn.executemany(
+                "DELETE FROM storage_containers WHERE id = ?",
+                [(row["id"],) for row in container_rows],
+            )
+
+    @classmethod
+    def _reconcile_storage_containers(cls, conn: sqlite3.Connection) -> None:
+        """Remove stale containers for aliquots that were consumed earlier."""
+        configurations = (
+            ("protein_expressed", "protein_expressed_id", "remaining_falcons"),
+            ("protein_purified", "protein_purified_id", "remaining_aliquots"),
+        )
+
+        for table, item_column, remaining_column in configurations:
+            records = conn.execute(
+                f"SELECT id, {remaining_column} FROM {table}"
+            ).fetchall()
+            for record in records:
+                container_rows = conn.execute(
+                    f"""
+                    SELECT c.id
+                    FROM storage_containers c
+                    JOIN storage_positions p ON p.id = c.position_id
+                    WHERE c.{item_column} = ?
+                    ORDER BY p.box_id, p.position, c.id
+                    """,
+                    (record["id"],),
+                ).fetchall()
+                excess = len(container_rows) - int(record[remaining_column])
+                if excess > 0:
+                    conn.executemany(
+                        "DELETE FROM storage_containers WHERE id = ?",
+                        [(row["id"],) for row in container_rows[:excess]],
+                    )
+
     def consume_expressed(self, record_id: int, quantity: int, reason: str | None = None) -> None:
         with self._conn() as conn:
             row = conn.execute(
@@ -257,6 +330,9 @@ class ProteinRepository:
                 VALUES (?, ?, ?, ?)
                 """,
                 ("protein_expressed", record_id, quantity, reason or "manual usage"),
+            )
+            self._release_storage_containers(
+                conn, "protein_expressed_id", record_id, quantity
             )
 
     def consume_purified(self, record_id: int, quantity: int, reason: str | None = None) -> None:
@@ -293,6 +369,9 @@ class ProteinRepository:
                 """,
                 ("protein_purified", record_id, quantity, reason or "manual usage"),
             )
+            self._release_storage_containers(
+                conn, "protein_purified_id", record_id, quantity
+            )
 
     def list_usage_history(self, owner_table: str, owner_id: int):
         with self._conn() as conn:
@@ -305,3 +384,38 @@ class ProteinRepository:
                 (owner_table, owner_id),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def search_usage_history(self, text: str = "") -> list[dict]:
+        """Return protein usage events, enriched with the protein identity."""
+        pattern = f"%{text.strip()}%"
+
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    h.id,
+                    CASE h.owner_table
+                        WHEN 'protein_expressed' THEN 'Expressed protein'
+                        WHEN 'protein_purified' THEN 'Purified protein'
+                    END AS type,
+                    COALESCE(e.sample_id, p.sample_id) AS sample_id,
+                    COALESCE(e.protein_name, p.protein_name) AS protein_name,
+                    h.quantity,
+                    h.reason,
+                    h.used_at
+                FROM protein_usage_history h
+                LEFT JOIN protein_expressed e
+                    ON h.owner_table = 'protein_expressed' AND h.owner_id = e.id
+                LEFT JOIN protein_purified p
+                    ON h.owner_table = 'protein_purified' AND h.owner_id = p.id
+                WHERE
+                    COALESCE(e.sample_id, p.sample_id, '') LIKE ?
+                    OR COALESCE(e.protein_name, p.protein_name, '') LIKE ?
+                    OR COALESCE(h.reason, '') LIKE ?
+                    OR h.owner_table LIKE ?
+                ORDER BY h.used_at DESC, h.id DESC
+                """,
+                (pattern, pattern, pattern, pattern),
+            ).fetchall()
+
+        return [dict(row) for row in rows]

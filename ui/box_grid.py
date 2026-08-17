@@ -120,10 +120,10 @@ def render_box_grid(box, occupied_positions, selectable=False, key_prefix="", en
                     )
                     
                     # If enriched data is available and button is clicked,
-                    # store container info and trigger rerun to show modal
+                    # store container info; the caller can render its detail
+                    # immediately below this grid in the same dialog run.
                     if clicked and enriched_data and container_id in enriched_map:
                         st.session_state[f"{key_prefix}_selected_container"] = enriched_map[container_id]
-                        st.rerun()
 
                 else:
 

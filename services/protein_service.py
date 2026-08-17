@@ -52,6 +52,9 @@ class ProteinService:
     def list_usage_history(self, owner_table: str, owner_id: int):
         return self.repository.list_usage_history(owner_table, owner_id)
 
+    def search_usage_history(self, text: str = ""):
+        return self.repository.search_usage_history(text)
+
     # =====================================================
     # ATTACHMENTS
     # =====================================================
