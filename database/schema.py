@@ -35,13 +35,16 @@ def initialize_database() -> None:
     create_storage_positions_table(conn)
 
     create_dna_stock_table(conn)
-    create_protein_aliquots_table(conn)
+    create_protein_expressed_table(conn)
+    create_protein_purified_table(conn)
     create_reagent_lots_table(conn)
+    create_attachments_table(conn)
 
     create_storage_containers_table(conn)
 
     create_indexes(conn)
     create_item_link_indexes(conn)
+    create_protein_indexes(conn)
 
     conn.commit()
     conn.close()
@@ -188,21 +191,123 @@ def create_dna_stock_table(conn: Connection) -> None:
     )
 
 
-def create_protein_aliquots_table(conn: Connection) -> None:
+def create_protein_expressed_table(conn: Connection) -> None:
 
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS protein_aliquots (
+        CREATE TABLE IF NOT EXISTS protein_expressed (
 
             id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-            name TEXT NOT NULL,
+            sample_id TEXT NOT NULL UNIQUE,
+            -- auto-generated (e.g. "EXP-0001"), never entered
+            -- by hand -- see services/protein_service.py
 
-            notes TEXT
+            protein_name TEXT NOT NULL,
+            construct TEXT,
+            variant TEXT,
+            media TEXT,
+
+            batch_no TEXT,
+
+            volume_per_falcon_l REAL,
+            -- litres, as specified (not a typo)
+
+            buffer TEXT,
+
+            date_stored TEXT,
+            notebook_ref TEXT,
+
+            total_falcons INTEGER NOT NULL,
+            -- how many Falcons this batch was split into --
+            -- matches the number of storage_containers rows
+            -- created for this record
+
+            notes TEXT,
+
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 
         );
         """
     )
+
+
+def create_protein_purified_table(conn: Connection) -> None:
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS protein_purified (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            sample_id TEXT NOT NULL UNIQUE,
+            -- auto-generated (e.g. "PUR-0001")
+
+            protein_name TEXT NOT NULL,
+            construct TEXT,
+            variant TEXT,
+            media TEXT,
+
+            batch_no TEXT,
+
+            concentration_um REAL,
+            volume_ul REAL,
+
+            buffer TEXT,
+
+            date_stored TEXT,
+            notebook_ref TEXT,
+
+            total_aliquots INTEGER NOT NULL,
+            -- matches the number of storage_containers rows
+            -- created for this record
+
+            notes TEXT,
+
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+
+        );
+        """
+    )
+
+
+def create_attachments_table(conn: Connection) -> None:
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attachments (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            -- Which record this file belongs to. Polymorphic by
+            -- design (unlike storage_containers' exclusive FKs)
+            -- because the set of attachable tables will keep
+            -- growing as new modules are built, and adding a
+            -- column to this table per module would be worse
+            -- than the loss of DB-level referential integrity
+            -- here. The owning module is responsible for not
+            -- leaving orphaned rows (e.g. delete attachments when
+            -- deleting the parent record).
+            owner_table TEXT NOT NULL,
+            owner_id INTEGER NOT NULL,
+
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            -- relative path under storage/attachments/, per config.py
+
+            uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+
+        );
+        """
+    )
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_attachments_owner
+        ON attachments(owner_table, owner_id);
+    """)
+
 
 
 def create_reagent_lots_table(conn: Connection) -> None:
@@ -238,7 +343,8 @@ def create_storage_containers_table(conn: Connection) -> None:
                 CHECK(
                     container_type IN (
                         'DNA',
-                        'PROTEIN_ALIQUOT',
+                        'PROTEIN_EXPRESSED',
+                        'PROTEIN_PURIFIED',
                         'REAGENT_LOT'
                     )
                 ),
@@ -246,7 +352,8 @@ def create_storage_containers_table(conn: Connection) -> None:
             position_id INTEGER NOT NULL UNIQUE,
 
             dna_id INTEGER,
-            protein_aliquot_id INTEGER,
+            protein_expressed_id INTEGER,
+            protein_purified_id INTEGER,
             reagent_lot_id INTEGER,
 
             label TEXT,
@@ -274,8 +381,12 @@ def create_storage_containers_table(conn: Connection) -> None:
                 REFERENCES dna_stock(id)
                 ON DELETE RESTRICT,
 
-            FOREIGN KEY(protein_aliquot_id)
-                REFERENCES protein_aliquots(id)
+            FOREIGN KEY(protein_expressed_id)
+                REFERENCES protein_expressed(id)
+                ON DELETE RESTRICT,
+
+            FOREIGN KEY(protein_purified_id)
+                REFERENCES protein_purified(id)
                 ON DELETE RESTRICT,
 
             FOREIGN KEY(reagent_lot_id)
@@ -285,7 +396,8 @@ def create_storage_containers_table(conn: Connection) -> None:
             CHECK(
                 (
                     (dna_id IS NOT NULL) +
-                    (protein_aliquot_id IS NOT NULL) +
+                    (protein_expressed_id IS NOT NULL) +
+                    (protein_purified_id IS NOT NULL) +
                     (reagent_lot_id IS NOT NULL)
                 ) = 1
             ),
@@ -293,8 +405,10 @@ def create_storage_containers_table(conn: Connection) -> None:
             CHECK(
                 (container_type = 'DNA'
                     AND dna_id IS NOT NULL) OR
-                (container_type = 'PROTEIN_ALIQUOT'
-                    AND protein_aliquot_id IS NOT NULL) OR
+                (container_type = 'PROTEIN_EXPRESSED'
+                    AND protein_expressed_id IS NOT NULL) OR
+                (container_type = 'PROTEIN_PURIFIED'
+                    AND protein_purified_id IS NOT NULL) OR
                 (container_type = 'REAGENT_LOT'
                     AND reagent_lot_id IS NOT NULL)
             )
@@ -347,13 +461,21 @@ def create_item_link_indexes(conn: Connection) -> None:
     """)
 
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_containers_protein
-        ON storage_containers(protein_aliquot_id);
+        CREATE INDEX IF NOT EXISTS idx_containers_reagent
+        ON storage_containers(reagent_lot_id);
+    """)
+
+
+def create_protein_indexes(conn: Connection) -> None:
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_containers_protein_expressed
+        ON storage_containers(protein_expressed_id);
     """)
 
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_containers_reagent
-        ON storage_containers(reagent_lot_id);
+        CREATE INDEX IF NOT EXISTS idx_containers_protein_purified
+        ON storage_containers(protein_purified_id);
     """)
 
 
@@ -380,8 +502,10 @@ def recreate_database() -> None:
         "storage_racks",
         "storage_freezers",
         "dna_stock",
-        "protein_aliquots",
+        "protein_expressed",
+        "protein_purified",
         "reagent_lots",
+        "attachments",
     )
 
     for table in tables:

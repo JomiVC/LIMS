@@ -1,16 +1,13 @@
 """
 repositories/item_repository.py
 
-Minimal repository for the item stub tables (dna_stock,
-protein_aliquots, reagent_lots).
+Minimal repository for the remaining item stub tables (dna_stock,
+reagent_lots). Proteins are no longer here -- they have real tables
+now (protein_expressed, protein_purified) with their own dedicated
+repository as part of the Proteins module.
 
 These tables are intentionally minimal (id, name, notes) until the
-real DNA / Protein / Reagent modules are built. This repository
-exists so the Containers UI has something to select or quickly
-create -- it is NOT the final repository for those future modules.
-When each module is built, replace the relevant methods here with
-a dedicated repository (e.g. repositories/dna_repository.py) that
-matches that table's real, expanded schema.
+real DNA / Reagent modules are built.
 """
 
 import sqlite3
@@ -70,35 +67,6 @@ class ItemRepository:
             return cursor.lastrowid
 
     # =====================================================
-    # PROTEIN ALIQUOTS
-    # =====================================================
-
-    def list_proteins(self) -> list[sqlite3.Row]:
-
-        with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM protein_aliquots ORDER BY name"
-            ).fetchall()
-
-    def get_protein(self, protein_id: int) -> sqlite3.Row | None:
-
-        with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM protein_aliquots WHERE id = ?",
-                (protein_id,)
-            ).fetchone()
-
-    def create_protein(self, name: str, notes: str = "") -> int:
-
-        with self._conn() as conn:
-            cursor = conn.execute(
-                "INSERT INTO protein_aliquots (name, notes) "
-                "VALUES (?, ?)",
-                (name, notes)
-            )
-            return cursor.lastrowid
-
-    # =====================================================
     # REAGENT LOTS
     # =====================================================
 
@@ -127,14 +95,11 @@ class ItemRepository:
             return cursor.lastrowid
 
     # =====================================================
-    # GENERIC (used by the Containers UI to resolve a name
-    # for display without needing to know which type it is
-    # ahead of time)
+    # GENERIC
     # =====================================================
 
     _TABLES = {
         "DNA": "dna_stock",
-        "PROTEIN_ALIQUOT": "protein_aliquots",
         "REAGENT_LOT": "reagent_lots",
     }
 

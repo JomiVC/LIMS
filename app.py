@@ -15,29 +15,33 @@ st.set_page_config(
 
 st.title("🧪 Laboratory Information Management System")
 
+# See pages/storage.py for why this marker exists -- it lets that
+# page detect whether the user just navigated in from elsewhere.
+st.session_state["_active_page_marker"] = "home"
+
 st.markdown(
     """
-Bienvenido al nuevo **LIMS**.
+Welcome to the new **LIMS**.
 
-Este sistema permitirá gestionar:
+This system will let you manage:
 
-- 📦 Almacenamiento de muestras
-- 🧬 ADN
-- 🧫 Proteínas
-- 🧪 Reactivos
-- 📋 Pedidos
-- 👥 Usuarios
+- 📦 Sample storage
+- 🧬 DNA
+- 🧫 Proteins
+- 🧪 Reagents
+- 📋 Orders
+- 👥 Users
 
-Selecciona un módulo desde el menú lateral para comenzar.
+Select a module from the sidebar menu to get started.
 """
 )
 
 st.divider()
 
-st.subheader("Estado del proyecto")
+st.subheader("Project status")
 
-st.success("✔ Base de datos SQLite creada")
-st.success("✔ Arquitectura del proyecto creada")
-st.success("✔ Storage Engine implementado")
+st.success("✔ SQLite database created")
+st.success("✔ Project architecture created")
+st.success("✔ Storage Engine implemented")
 
-st.info("Siguiente objetivo: Registro y gestión de cajas de almacenamiento.")
+st.info("Next goal: Storage box registration and management.")

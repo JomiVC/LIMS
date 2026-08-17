@@ -639,7 +639,12 @@ class StorageRepository:
     # holds the link, and which table that FK must point to.
     _ITEM_LINK_COLUMNS = {
         "DNA": ("dna_id", "dna_stock"),
-        "PROTEIN_ALIQUOT": ("protein_aliquot_id", "protein_aliquots"),
+        "PROTEIN_EXPRESSED": (
+            "protein_expressed_id", "protein_expressed"
+        ),
+        "PROTEIN_PURIFIED": (
+            "protein_purified_id", "protein_purified"
+        ),
         "REAGENT_LOT": ("reagent_lot_id", "reagent_lots"),
     }
 
@@ -657,7 +662,8 @@ class StorageRepository:
         (one of models.storage.CONTAINER_TYPES).
 
         `item_id` must already exist in the matching item table
-        (dna_stock / protein_aliquots / reagent_lots) -- this is
+        (dna_stock / protein_expressed / protein_purified /
+        reagent_lots) -- this is
         enforced by the FK, but we check explicitly first to raise
         a clear domain error instead of a raw IntegrityError.
         """

@@ -33,6 +33,16 @@ from ui.rack_grid import (
 
 st.set_page_config(page_title="LIMS - Storage", page_icon="📦")
 
+# Streamlit's session_state persists across page navigation, so a
+# leftover "active" grid selection from a previous visit would
+# reopen the box dialog immediately on arrival. Reset it only when
+# we detect we've just navigated here from a different page (i.e.
+# the marker left by the previously active page isn't "storage").
+if st.session_state.get("_active_page_marker") != "storage":
+    clear_active_selection("browse")
+
+st.session_state["_active_page_marker"] = "storage"
+
 storage_service = StorageService()
 item_service = ItemService()
 

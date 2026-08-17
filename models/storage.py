@@ -135,7 +135,9 @@ class Position:
 
 CONTAINER_STATUSES = ("ACTIVE", "CONSUMED", "DISCARDED")
 
-CONTAINER_TYPES = ("DNA", "PROTEIN_ALIQUOT", "REAGENT_LOT")
+CONTAINER_TYPES = (
+    "DNA", "PROTEIN_EXPRESSED", "PROTEIN_PURIFIED", "REAGENT_LOT"
+)
 
 
 # ==========================================================
@@ -147,7 +149,8 @@ class Container:
     """
     A container occupies exactly one storage position and holds
     exactly one item, linked through one of dna_id /
-    protein_aliquot_id / reagent_lot_id (matching container_type).
+    protein_expressed_id / protein_purified_id / reagent_lot_id
+    (matching container_type).
 
     Mirrors the CHECK constraints in storage_containers: exactly
     one item_id field is set, and it matches container_type.
@@ -158,7 +161,8 @@ class Container:
     position_id: int
     label: Optional[str]
     dna_id: Optional[int] = None
-    protein_aliquot_id: Optional[int] = None
+    protein_expressed_id: Optional[int] = None
+    protein_purified_id: Optional[int] = None
     reagent_lot_id: Optional[int] = None
     status: str = "ACTIVE"
     created_at: Optional[datetime] = None
@@ -177,7 +181,8 @@ class Container:
 
         item_ids = (
             self.dna_id,
-            self.protein_aliquot_id,
+            self.protein_expressed_id,
+            self.protein_purified_id,
             self.reagent_lot_id,
         )
 
@@ -185,13 +190,15 @@ class Container:
 
         if set_count != 1:
             raise ValueError(
-                "Exactly one of dna_id / protein_aliquot_id / "
-                f"reagent_lot_id must be set (got {set_count})."
+                "Exactly one of dna_id / protein_expressed_id / "
+                "protein_purified_id / reagent_lot_id must be set "
+                f"(got {set_count})."
             )
 
         expected = {
             "DNA": self.dna_id,
-            "PROTEIN_ALIQUOT": self.protein_aliquot_id,
+            "PROTEIN_EXPRESSED": self.protein_expressed_id,
+            "PROTEIN_PURIFIED": self.protein_purified_id,
             "REAGENT_LOT": self.reagent_lot_id,
         }[self.container_type]
 
@@ -206,7 +213,8 @@ class Container:
         """The id of the linked item, regardless of its type."""
         return (
             self.dna_id
-            or self.protein_aliquot_id
+            or self.protein_expressed_id
+            or self.protein_purified_id
             or self.reagent_lot_id
         )
 
@@ -218,7 +226,8 @@ class Container:
             position_id=row["position_id"],
             label=row["label"],
             dna_id=row["dna_id"],
-            protein_aliquot_id=row["protein_aliquot_id"],
+            protein_expressed_id=row["protein_expressed_id"],
+            protein_purified_id=row["protein_purified_id"],
             reagent_lot_id=row["reagent_lot_id"],
             status=row["status"],
             created_at=_parse_dt(row["created_at"]),
