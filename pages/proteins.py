@@ -70,7 +70,7 @@ def _display_attachments(owner_table, owner_id):
                 st.caption(f"⚠️ {att['file_name']} (file not found at {file_path})")
 
 
-def _protein_row_dict(record, is_expressed=True):
+def _protein_row_dict(record, is_expressed=True, location_text="—"):
     """Convert a protein record into a flat row for a dataframe view."""
     total = record.total_falcons if is_expressed else record.total_aliquots
     used = record.used_falcons if is_expressed else record.used_aliquots
@@ -90,6 +90,7 @@ def _protein_row_dict(record, is_expressed=True):
         "Total": total,
         "Used": used,
         "Remaining": remaining,
+        "Location": location_text,
         "Notes": record.notes or "—",
     }
 
@@ -100,6 +101,46 @@ def _protein_row_dict(record, is_expressed=True):
         row["Vol. (µL)"] = record.volume_ul or "—"
 
     return row
+
+
+def _display_selected_protein_actions(record, is_expressed=True):
+    """Show only two actions for a selected row: attachments or consume aliquot."""
+    action = st.radio(
+        "Action",
+        options=["View attachments", "Use aliquot"],
+        horizontal=True,
+        key=f"protein_action_{record.id}_{'exp' if is_expressed else 'pur'}",
+    )
+
+    if action == "View attachments":
+        _display_attachments(
+            "protein_expressed" if is_expressed else "protein_purified",
+            record.id,
+        )
+    elif action == "Use aliquot":
+        total = record.total_falcons if is_expressed else record.total_aliquots
+        used = record.used_falcons if is_expressed else record.used_aliquots
+        remaining = record.remaining_falcons if is_expressed else record.remaining_aliquots
+        qty = st.number_input(
+            "Qty to use",
+            min_value=1,
+            max_value=remaining if remaining > 0 else 1,
+            step=1,
+            value=1,
+            key=f"protein_use_qty_{record.id}_{'exp' if is_expressed else 'pur'}",
+        )
+        if st.button("Confirm use", key=f"protein_use_btn_{record.id}_{'exp' if is_expressed else 'pur'}"):
+            try:
+                if is_expressed:
+                    protein_service.consume_expressed(record.id, int(qty), reason="manual use")
+                else:
+                    protein_service.consume_purified(record.id, int(qty), reason="manual use")
+                st.success(f"✅ {qty} aliquot(s) used.")
+                st.rerun()
+            except ValueError as e:
+                st.error(str(e))
+
+        st.caption(f"Total: {total} | Used: {used} | Remaining: {remaining}")
 
 
 def _display_protein_details(record, is_expressed=True):
@@ -193,53 +234,61 @@ def _display_protein_details(record, is_expressed=True):
 
 with tab_registro:
 
-    if not query:
-        st.caption("Type above to search across all protein records.")
+    results = protein_service.search_all(query or "")
+
+    if not results["expressed"] and not results["purified"]:
+        st.info("No matching records found.")
 
     else:
-        results = protein_service.search_all(query)
+        filter_type = st.selectbox(
+            "Filter by type",
+            options=["All", "Expressed", "Purified"],
+            key="protein_global_filter",
+        )
 
-        if not results["expressed"] and not results["purified"]:
-            st.info("No matching records found.")
+        rows = []
+        records = []
+        if results["expressed"]:
+            for record in results["expressed"]:
+                if filter_type in ("All", "Expressed"):
+                    location = protein_service.storage_service.get_container_for_item("PROTEIN_EXPRESSED", record.id)
+                    location_text = (
+                        f"{location['rack_name']} / {location['box_name']} / {location['position']}"
+                        if location else "Not yet assigned to a location"
+                    )
+                    rows.append(_protein_row_dict(record, is_expressed=True, location_text=location_text))
+                    records.append((True, record))
 
+        if results["purified"]:
+            for record in results["purified"]:
+                if filter_type in ("All", "Purified"):
+                    location = protein_service.storage_service.get_container_for_item("PROTEIN_PURIFIED", record.id)
+                    location_text = (
+                        f"{location['rack_name']} / {location['box_name']} / {location['position']}"
+                        if location else "Not yet assigned to a location"
+                    )
+                    rows.append(_protein_row_dict(record, is_expressed=False, location_text=location_text))
+                    records.append((False, record))
+
+        if not rows:
+            st.info("No records match the selected filter.")
         else:
-            filter_type = st.selectbox(
-                "Filter by type",
-                options=["All", "Expressed", "Purified"],
-                key="protein_global_filter",
+            df = pd.DataFrame(rows)
+            selected = st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                selection_mode="single-row",
+                on_select="rerun",
+                key="protein_global_table",
             )
 
-            rows = []
-            records = []
-            if results["expressed"]:
-                for record in results["expressed"]:
-                    if filter_type in ("All", "Expressed"):
-                        rows.append(_protein_row_dict(record, is_expressed=True))
-                        records.append((True, record))
-
-            if results["purified"]:
-                for record in results["purified"]:
-                    if filter_type in ("All", "Purified"):
-                        rows.append(_protein_row_dict(record, is_expressed=False))
-                        records.append((False, record))
-
-            if not rows:
-                st.info("No records match the selected filter.")
-            else:
-                df = pd.DataFrame(rows)
-                selected = st.dataframe(
-                    df,
-                    use_container_width=True,
-                    hide_index=True,
-                    selection_mode="single-row",
-                    on_select="rerun",
-                    key="protein_global_table",
-                )
-
-                if selected and selected.selection.rows:
-                    record_tuple = records[selected.selection.rows[0]]
-                    st.divider()
-                    _display_protein_details(record_tuple[1], is_expressed=record_tuple[0])
+            if selected and selected.selection.rows:
+                idx = selected.selection.rows[0]
+                record_tuple = records[idx]
+                st.divider()
+                st.subheader(f"{record_tuple[1].sample_id} — {record_tuple[1].protein_name}")
+                _display_selected_protein_actions(record_tuple[1], is_expressed=record_tuple[0])
 
 
 # ==========================================================
