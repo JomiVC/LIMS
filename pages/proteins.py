@@ -108,6 +108,23 @@ def _protein_row_dict(record, is_expressed=True, location_text="—"):
     return row
 
 
+def _format_sample_label(record):
+    """
+    Formats a protein record as 'Sample ID | Protein | Construct |
+    Variant | Media', used wherever a selected sample's identity
+    needs to be shown (e.g. right above the attachments/actions
+    panel). Falls back to the numeric id when sample_id is missing,
+    and to '-' for any other missing field.
+    """
+    sample_id = record.sample_id or str(record.id)
+    protein_name = record.protein_name or "-"
+    construct = record.construct or "-"
+    variant = record.variant or "-"
+    media = record.media or "-"
+
+    return f"{sample_id} | {protein_name} | {construct} | {variant} | {media}"
+
+
 def _display_selected_protein_actions(record, is_expressed=True, key_prefix=""):
     """
     Show only two actions for a selected row: attachments or
@@ -194,7 +211,7 @@ def _display_protein_selection_table(records, is_expressed, table_key):
     if selected and selected.selection.rows:
         record = records[selected.selection.rows[0]]
         st.divider()
-        st.subheader(f"{record.sample_id} â€” {record.protein_name}")
+        st.subheader(_format_sample_label(record))
         _display_selected_protein_actions(
             record, is_expressed=is_expressed, key_prefix=table_key
         )
@@ -344,7 +361,7 @@ with tab_registro:
                 idx = selected.selection.rows[0]
                 record_tuple = records[idx]
                 st.divider()
-                st.subheader(f"{record_tuple[1].sample_id} — {record_tuple[1].protein_name}")
+                st.subheader(_format_sample_label(record_tuple[1]))
                 _display_selected_protein_actions(
                     record_tuple[1],
                     is_expressed=record_tuple[0],
