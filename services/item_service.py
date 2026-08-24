@@ -52,7 +52,7 @@ class ItemService:
             {
                 "id": p.id,
                 "name": p.protein_name,
-                "notes": f"Batch: {p.batch_no}, Falcons: {p.total_falcons}"
+                "notes": p.notes or ""
             }
             for p in proteins
         ]
@@ -64,7 +64,7 @@ class ItemService:
             {
                 "id": p.id,
                 "name": p.protein_name,
-                "notes": f"Batch: {p.batch_no}, Aliquots: {p.total_aliquots}"
+                "notes": p.notes or ""
             }
             for p in proteins
         ]

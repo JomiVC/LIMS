@@ -9,6 +9,8 @@ ValueError, so callers (Streamlit pages) only ever need to
 catch one exception type at this boundary.
 """
 
+from typing import Optional, Any
+
 from repositories.storage_repository import (
     StorageRepository,
     StorageError,
@@ -284,16 +286,15 @@ class StorageService:
 
     def create_container(
         self,
-        position_id,
-        container_type,
-        item_id,
-        label,
-        notes=""
+        position_id: int,
+        container_type: str,
+        item_id: int,
+        label: str,
+        notes: str = "",
+        conn: Optional[Any] = None,
     ):
         """
-        `container_type` must be one of models.storage.CONTAINER_TYPES
-        ('DNA' | 'PROTEIN_ALIQUOT' | 'REAGENT_LOT'), and `item_id`
-        must reference an existing row in the matching item table.
+        Creates a container linking a physical position to an item.
         """
 
         label = label.strip().upper()
@@ -301,7 +302,7 @@ class StorageService:
         if not label:
             raise ValueError("Container label cannot be empty.")
 
-        existing = self.repository.get_container_by_label(label)
+        existing = self.repository.get_container_by_label(label, conn=conn)
 
         if existing:
             raise ValueError(f"Container '{label}' already exists.")
@@ -312,7 +313,8 @@ class StorageService:
                 container_type=container_type,
                 item_id=item_id,
                 label=label,
-                notes=notes
+                notes=notes,
+                conn=conn,
             )
         except StorageError as e:
             raise ValueError(str(e)) from e

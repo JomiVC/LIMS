@@ -5,12 +5,12 @@ Proteins module.
 
 Structure:
     (search bar, searches across expressed + purified)
-    Registro          -- global search results
+    Sample Registry   -- global search results
     Expressed proteins -- search scoped to expressed + register new
     Purified proteins  -- search scoped to purified + register new
     Proteases          -- pending (guidelines not defined yet)
 
-Assumption made here (flag if wrong): "Registro" is a read-only
+Assumption made here (flag if wrong): "Sample Registry" is a read-only
 cross-type search view; the registration forms live inside their
 own "Expressed proteins" / "Purified proteins" tabs.
 """
@@ -24,6 +24,7 @@ from services.protein_service import ProteinService
 from services.protein_container_detail_provider import format_sample_label
 from ui.attachments import render_attachments
 from ui.box_grid import render_box_grid
+from ui.use_aliquot import render_use_aliquot_form
 
 
 st.set_page_config(page_title="LIMS - Proteins", page_icon="🧫")
@@ -37,7 +38,7 @@ st.title("🧫 Proteins")
 query = st.text_input("Search", key="proteins_search_query")
 
 tab_registro, tab_expressed, tab_purified, tab_history, tab_proteases = st.tabs(
-    ["Registro", "Expressed proteins", "Purified proteins", "Usage history", "Proteases"]
+    ["Sample Registry", "Expressed proteins", "Purified proteins", "Usage history", "Proteases"]
 )
 
 
@@ -58,32 +59,19 @@ def _display_attachments(owner_table, owner_id):
         attachments, key_prefix=f"protein_{owner_table}_{owner_id}"
     )
     return
-    
-    if attachments:
-        st.markdown("**📎 Attachments:**")
-        for att in attachments:
-            # Convert relative path to absolute
-            file_path = BASE_DIR / att["file_path"]
-            if file_path.exists():
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        label=f"📥 {att['file_name']}",
-                        data=f.read(),
-                        file_name=att['file_name'],
-                        key=f"download_{att['id']}"
-                    )
-            else:
-                st.caption(f"⚠️ {att['file_name']} (file not found at {file_path})")
 
 
-def _protein_row_dict(record, is_expressed=True, location_text="—"):
+def _protein_row_dict(record, is_expressed=True, location_text="—", include_type=True):
     """Convert a protein record into a flat row for a dataframe view."""
     total = record.total_falcons if is_expressed else record.total_aliquots
     used = record.used_falcons if is_expressed else record.used_aliquots
     remaining = record.remaining_falcons if is_expressed else record.remaining_aliquots
 
-    row = {
-        "Type": "Expressed protein" if is_expressed else "Purified protein",
+    row = {}
+    if include_type:
+        row["Type"] = "Expressed protein" if is_expressed else "Purified protein"
+
+    row.update({
         "Sample ID": record.sample_id,
         "Protein": record.protein_name,
         "Construct": record.construct or "—",
@@ -98,7 +86,7 @@ def _protein_row_dict(record, is_expressed=True, location_text="—"):
         "Remaining": remaining,
         "Location": location_text,
         "Notes": record.notes or "—",
-    }
+    })
 
     if is_expressed:
         row["Vol/Falcon (L)"] = record.volume_per_falcon_l or "—"
@@ -113,15 +101,6 @@ def _display_selected_protein_actions(record, is_expressed=True, key_prefix=""):
     """
     Show only two actions for a selected row: attachments or
     consume aliquot.
-
-    `key_prefix` scopes every widget key to the caller's table/tab
-    context (e.g. 'registro', 'expressed_table', 'purified_table').
-    Without it, the same record selected simultaneously in two
-    different tables (e.g. the global "Registro" tab and the
-    "Expressed proteins" tab -- both run on every rerun, since
-    st.tabs renders every tab's content regardless of which is
-    visible) produces the same key twice and Streamlit raises
-    StreamlitDuplicateElementKey.
     """
     scope = f"{key_prefix}_" if key_prefix else ""
     suffix = f"{scope}{record.id}_{'exp' if is_expressed else 'pur'}"
@@ -142,20 +121,15 @@ def _display_selected_protein_actions(record, is_expressed=True, key_prefix=""):
         total = record.total_falcons if is_expressed else record.total_aliquots
         used = record.used_falcons if is_expressed else record.used_aliquots
         remaining = record.remaining_falcons if is_expressed else record.remaining_aliquots
-        qty = st.number_input(
-            "Qty to use",
-            min_value=1,
-            max_value=remaining if remaining > 0 else 1,
-            step=1,
-            value=1,
-            key=f"protein_use_qty_{suffix}",
-        )
-        if st.button("Confirm use", key=f"protein_use_btn_{suffix}"):
+        
+        qty, reason_text, is_confirmed = render_use_aliquot_form(f"protein_act_{suffix}", remaining)
+
+        if is_confirmed:
             try:
                 if is_expressed:
-                    protein_service.consume_expressed(record.id, int(qty), reason="manual use")
+                    protein_service.consume_expressed(record.id, int(qty), reason=reason_text)
                 else:
-                    protein_service.consume_purified(record.id, int(qty), reason="manual use")
+                    protein_service.consume_purified(record.id, int(qty), reason=reason_text)
                 st.success(f"✅ {qty} aliquot(s) used.")
                 st.rerun()
             except ValueError as e:
@@ -179,7 +153,7 @@ def _display_protein_selection_table(records, is_expressed, table_key):
         )
         rows.append(
             _protein_row_dict(
-                record, is_expressed=is_expressed, location_text=location_text
+                record, is_expressed=is_expressed, location_text=location_text, include_type=False
             )
         )
 
@@ -243,27 +217,31 @@ def _display_protein_details(record, is_expressed=True):
             st.write(f"**🧮 Used:** {used}")
             st.write(f"**📦 Remaining:** {remaining}")
         
+        if is_expressed:
+            derived_purifs = protein_service.get_purifications_for_expression(record.id)
+            if derived_purifs:
+                purif_labels = ", ".join([p.sample_id for p in derived_purifs])
+                st.info(f"🔗 **Purificaciones Derivadas**: {purif_labels}")
+        else:
+            if getattr(record, "source_expression_id", None):
+                source_exp = protein_service.get_source_expression_for_purification(record.id)
+                if source_exp:
+                    st.info(f"🔗 **Expresión Origen**: {source_exp.sample_id} ({source_exp.protein_name})")
+
         if record.notes:
             st.write(f"**📝 Notes:** {record.notes}")
 
         st.divider()
         st.markdown("**🧪 Consumption / Use aliquot**")
         consume_prefix = f"{('exp' if is_expressed else 'pur')}_{record.id}_{record.sample_id.replace('-', '_')}"
-        qty = st.number_input(
-            "Qty to use",
-            min_value=1,
-            max_value=remaining if remaining > 0 else 1,
-            step=1,
-            value=1,
-            key=f"{consume_prefix}_qty",
-        )
+        qty, reason_text, is_confirmed = render_use_aliquot_form(f"det_{consume_prefix}", remaining)
 
-        if st.button("Use aliquot", key=f"{consume_prefix}_btn"):
+        if is_confirmed:
             try:
                 if is_expressed:
-                    protein_service.consume_expressed(record.id, int(qty), reason="manual use")
+                    protein_service.consume_expressed(record.id, int(qty), reason=reason_text)
                 else:
-                    protein_service.consume_purified(record.id, int(qty), reason="manual use")
+                    protein_service.consume_purified(record.id, int(qty), reason=reason_text)
                 st.success(f"✅ {qty} aliquot(s) used.")
                 st.rerun()
             except ValueError as e:
@@ -522,77 +500,106 @@ with tab_purified:
     else:
         st.info("No matching purified proteins found." if query else "No purified proteins found.")
 
-    st.subheader("Register new")
+    st.subheader("Register new (From Expressed Protein)")
 
-    p_protein_name = st.text_input("Protein Name", key="pur_protein_name")
-    p_construct = st.text_input("Construct", key="pur_construct")
-    p_variant = st.text_input("Variant", key="pur_variant")
-    p_media = st.selectbox("Media", options=["LB", "15N", "15N13C"], key="pur_media")
-    p_batch_no = st.text_input("Batch No.", key="pur_batch_no")
-    p_conc = st.number_input(
-        "Conc. (µM)", min_value=0.0, step=0.1, key="pur_conc"
-    )
-    p_vol = st.number_input(
-        "Vol. (µL)", min_value=0.0, step=1.0, key="pur_vol"
-    )
-    p_buffer = st.text_input("Buffer", key="pur_buffer")
-    p_date = st.date_input("Date Stored", key="pur_date")
-    p_notebook = st.text_input("Notebook Ref.", key="pur_notebook")
-    p_total = st.number_input(
-        "Total Aliquots", min_value=1, step=1, value=1, key="pur_total"
-    )
-    p_notes = st.text_area("Notes", value="", key="pur_notes")
+    available_expr = protein_service.list_available_expressed()
 
-    p_uploaded_files = st.file_uploader(
-        "Attachments (PDF, chromatograms, gels...)",
-        accept_multiple_files=True,
-        key="pur_files",
-    )
+    if not available_expr:
+        st.warning("⚠️ No expressed proteins available with remaining Falcons. Register a new expressed protein first.")
+    else:
+        expr_options = {
+            e.id: f"{e.sample_id} — {e.protein_name} ({e.variant or 'WT'}) | Falcons: {e.remaining_falcons}/{e.total_falcons} disponibles"
+            for e in available_expr
+        }
+        selected_exp_id = st.selectbox(
+            "Source Expressed Protein*",
+            options=list(expr_options.keys()),
+            format_func=lambda eid: expr_options[eid],
+            key="pur_source_exp_select",
+        )
 
-    st.divider()
-    st.subheader("Location")
+        selected_exp = next(e for e in available_expr if e.id == selected_exp_id)
 
-    pur_box_id, pur_start = _location_picker(
-        "EPPENDORF", int(p_total), "pur_loc"
-    )
+        st.info(
+            f"🧬 **Datos Heredados**: Proteína **{selected_exp.protein_name}** | "
+            f"Constructo: **{selected_exp.construct or '—'}** | Variante: **{selected_exp.variant or '—'}** | "
+            f"Medio: **{selected_exp.media or '—'}** | Lote: **{selected_exp.batch_no or '—'}**"
+        )
 
-    st.divider()
+        col1, col2 = st.columns(2)
+        with col1:
+            falcons_used = st.number_input(
+                f"Falcons used for purification (Max: {selected_exp.remaining_falcons})*",
+                min_value=1,
+                max_value=selected_exp.remaining_falcons,
+                value=1,
+                step=1,
+                key="pur_falcons_used",
+            )
+            p_conc = st.number_input(
+                "Conc. (µM)", min_value=0.0, step=0.1, key="pur_conc"
+            )
+            p_vol = st.number_input(
+                "Vol. (µL)", min_value=0.0, step=1.0, key="pur_vol"
+            )
 
-    if st.button("Register", key="pur_register_btn"):
+        with col2:
+            p_buffer = st.text_input("Buffer", key="pur_buffer")
+            p_date = st.date_input("Date Stored", key="pur_date")
+            p_notebook = st.text_input("Notebook Ref.", key="pur_notebook")
+            p_total = st.number_input(
+                "Total Aliquots", min_value=1, step=1, value=1, key="pur_total"
+            )
 
-        if not pur_box_id or not pur_start:
-            st.error("Choose a box and starting position first.")
+        p_notes = st.text_area("Notes", value="", key="pur_notes")
 
-        else:
-            try:
-                record_id, sample_id = protein_service.register_purified(
-                    protein_name=p_protein_name,
-                    construct=p_construct,
-                    variant=p_variant,
-                    media=p_media,
-                    batch_no=p_batch_no,
-                    concentration_um=p_conc,
-                    volume_ul=p_vol,
-                    buffer=p_buffer,
-                    date_stored=str(p_date),
-                    notebook_ref=p_notebook,
-                    total_aliquots=int(p_total),
-                    notes=p_notes,
-                    box_id=pur_box_id,
-                    start_position=pur_start,
-                    uploaded_files=p_uploaded_files,
-                )
-            except ValueError as e:
-                st.error(str(e))
+        p_uploaded_files = st.file_uploader(
+            "Attachments (PDF, chromatograms, gels...)",
+            accept_multiple_files=True,
+            key="pur_files",
+        )
+
+        st.divider()
+        st.subheader("Location")
+
+        pur_box_id, pur_start = _location_picker(
+            "EPPENDORF", int(p_total), "pur_loc"
+        )
+
+        st.divider()
+
+        if st.button("Register Purification", key="pur_register_btn"):
+
+            if not pur_box_id or not pur_start:
+                st.error("Choose an EPPENDORF box and starting position first.")
+
             else:
-                st.success(f"✅ Registered as {sample_id}.")
-                if p_uploaded_files:
-                    st.info(f"📎 {len(p_uploaded_files)} file(s) attached and saved.")
-                    with st.expander("View attached files"):
-                        _display_attachments("protein_purified", record_id)
-                st.session_state.pop("pur_loc_start_position", None)
-                time.sleep(1.5)
-                st.rerun()
+                try:
+                    record_id, sample_id = protein_service.register_purification_from_expression(
+                        source_expression_id=selected_exp_id,
+                        falcons_used=int(falcons_used),
+                        concentration_um=p_conc,
+                        volume_ul=p_vol,
+                        buffer=p_buffer,
+                        date_stored=str(p_date),
+                        notebook_ref=p_notebook,
+                        total_aliquots=int(p_total),
+                        notes=p_notes,
+                        box_id=pur_box_id,
+                        start_position=pur_start,
+                        uploaded_files=p_uploaded_files,
+                    )
+                except ValueError as e:
+                    st.error(str(e))
+                else:
+                    st.success(f"✅ Registered purification as {sample_id}.")
+                    if p_uploaded_files:
+                        st.info(f"📎 {len(p_uploaded_files)} file(s) attached and saved.")
+                        with st.expander("View attached files"):
+                            _display_attachments("protein_purified", record_id)
+                    st.session_state.pop("pur_loc_start_position", None)
+                    time.sleep(1.5)
+                    st.rerun()
 
 
 # ==========================================================

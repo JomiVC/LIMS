@@ -6,6 +6,7 @@ Data access for protein_expressed and protein_purified.
 
 import sqlite3
 from contextlib import contextmanager
+from typing import Optional
 
 from database.connection import get_connection
 from database.schema import ensure_protein_consumption_columns, create_protein_usage_history_table
@@ -15,11 +16,10 @@ from models.protein import ProteinExpressed, ProteinPurified
 class ProteinRepository:
 
     def ensure_schema(self):
-        with self._conn() as conn:
+        with self.transaction() as conn:
             ensure_protein_consumption_columns(conn)
             create_protein_usage_history_table(conn)
-            # Legacy records predate the remaining-* counters. Their default
-            # value was zero even though no aliquots had been used.
+            # Legacy records predate the remaining-* counters.
             conn.execute(
                 """
                 UPDATE protein_expressed
@@ -37,8 +37,8 @@ class ProteinRepository:
             self._reconcile_storage_containers(conn)
 
     @contextmanager
-    def _conn(self):
-
+    def transaction(self):
+        """Public context manager for multi-statement atomic transactions."""
         conn = get_connection()
         conn.execute("PRAGMA foreign_keys = ON;")
 
@@ -52,6 +52,9 @@ class ProteinRepository:
 
         finally:
             conn.close()
+
+    def _conn(self):
+        return self.transaction()
 
     def _next_sample_id(
         self, conn: sqlite3.Connection, table: str, prefix: str
@@ -97,7 +100,7 @@ class ProteinRepository:
         notes: str = "",
     ) -> tuple[int, str]:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
 
             sample_id = self._next_sample_id(
                 conn, "protein_expressed", "EXP"
@@ -124,9 +127,15 @@ class ProteinRepository:
 
             return cursor.lastrowid, sample_id
 
-    def get_expressed(self, record_id: int) -> ProteinExpressed | None:
+    def get_expressed(self, record_id: int, conn: Optional[sqlite3.Connection] = None) -> ProteinExpressed | None:
+        if conn is not None:
+            row = conn.execute(
+                "SELECT * FROM protein_expressed WHERE id = ?",
+                (record_id,)
+            ).fetchone()
+            return ProteinExpressed.from_row(row) if row else None
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM protein_expressed WHERE id = ?",
                 (record_id,)
@@ -136,7 +145,7 @@ class ProteinRepository:
 
     def list_expressed(self) -> list[ProteinExpressed]:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             rows = conn.execute(
                 "SELECT * FROM protein_expressed ORDER BY id DESC"
             ).fetchall()
@@ -145,7 +154,7 @@ class ProteinRepository:
 
     def search_expressed(self, text: str) -> list[ProteinExpressed]:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM protein_expressed
@@ -177,7 +186,7 @@ class ProteinRepository:
         notes: str = "",
     ) -> tuple[int, str]:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
 
             sample_id = self._next_sample_id(
                 conn, "protein_purified", "PUR"
@@ -204,9 +213,51 @@ class ProteinRepository:
 
             return cursor.lastrowid, sample_id
 
+    def create_purified_from_expression(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_expression_id: int,
+        protein_name: str,
+        construct: str,
+        variant: str,
+        media: str,
+        batch_no: str,
+        concentration_um: float | None,
+        volume_ul: float | None,
+        buffer: str,
+        date_stored: str,
+        notebook_ref: str,
+        total_aliquots: int,
+        notes: str = "",
+    ) -> tuple[int, str]:
+        """Creates a purified protein record linked to its source expression within an open transaction."""
+        sample_id = self._next_sample_id(conn, "protein_purified", "PUR")
+
+        cursor = conn.execute(
+            """
+            INSERT INTO protein_purified
+            (
+                sample_id, source_expression_id, protein_name, construct, variant,
+                media, batch_no, concentration_um, volume_ul,
+                buffer, date_stored, notebook_ref,
+                total_aliquots, used_aliquots, remaining_aliquots, notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sample_id, source_expression_id, protein_name, construct, variant,
+                media, batch_no, concentration_um, volume_ul,
+                buffer, date_stored, notebook_ref,
+                total_aliquots, 0, total_aliquots, notes,
+            )
+        )
+
+        return cursor.lastrowid, sample_id
+
     def get_purified(self, record_id: int) -> ProteinPurified | None:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             row = conn.execute(
                 "SELECT * FROM protein_purified WHERE id = ?",
                 (record_id,)
@@ -216,7 +267,7 @@ class ProteinRepository:
 
     def list_purified(self) -> list[ProteinPurified]:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             rows = conn.execute(
                 "SELECT * FROM protein_purified ORDER BY id DESC"
             ).fetchall()
@@ -225,7 +276,7 @@ class ProteinRepository:
 
     def search_purified(self, text: str) -> list[ProteinPurified]:
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM protein_purified
@@ -236,6 +287,77 @@ class ProteinRepository:
             ).fetchall()
 
         return [ProteinPurified.from_row(r) for r in rows]
+
+    def deduct_expression_falcons(
+        self,
+        conn: sqlite3.Connection,
+        expression_id: int,
+        falcons_used: int,
+        target_purification_sample_id: str,
+    ) -> None:
+        """Deducts Falcons from an expressed protein and logs the 'Purification' usage event."""
+        row = conn.execute(
+            "SELECT total_falcons, used_falcons, remaining_falcons FROM protein_expressed WHERE id = ?",
+            (expression_id,),
+        ).fetchone()
+
+        if row is None:
+            raise ValueError(f"Expressed protein record #{expression_id} not found.")
+
+        available = max(int(row["total_falcons"]) - int(row["used_falcons"]), 0)
+        if falcons_used < 1:
+            raise ValueError("Falcons used must be at least 1.")
+        if falcons_used > available:
+            raise ValueError(f"Only {available} falcon(s) available in expression #{expression_id}.")
+
+        new_used = int(row["used_falcons"]) + falcons_used
+        new_remaining = int(row["total_falcons"]) - new_used
+
+        conn.execute(
+            """
+            UPDATE protein_expressed
+            SET used_falcons = ?, remaining_falcons = ?, updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (new_used, new_remaining, expression_id),
+        )
+
+        reason_text = f"Purification ({target_purification_sample_id})"
+        conn.execute(
+            """
+            INSERT INTO protein_usage_history (owner_table, owner_id, quantity, reason)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("protein_expressed", expression_id, falcons_used, reason_text),
+        )
+
+        self._release_storage_containers(
+            conn, "protein_expressed_id", expression_id, falcons_used
+        )
+
+    def get_purifications_for_expression(self, expression_id: int) -> list[ProteinPurified]:
+        """Finds all purified protein batches derived from a specific expressed protein."""
+        with self.transaction() as conn:
+            rows = conn.execute(
+                "SELECT * FROM protein_purified WHERE source_expression_id = ? ORDER BY id DESC",
+                (expression_id,),
+            ).fetchall()
+
+        return [ProteinPurified.from_row(r) for r in rows]
+
+    def get_source_expression_for_purification(self, purification_id: int) -> ProteinExpressed | None:
+        """Finds the source expressed protein for a given purified protein batch."""
+        with self.transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT e.* FROM protein_expressed e
+                JOIN protein_purified p ON p.source_expression_id = e.id
+                WHERE p.id = ?
+                """,
+                (purification_id,),
+            ).fetchone()
+
+        return ProteinExpressed.from_row(row) if row else None
 
     # =====================================================
     # USAGE TRACKING
@@ -298,7 +420,7 @@ class ProteinRepository:
                     )
 
     def consume_expressed(self, record_id: int, quantity: int, reason: str | None = None) -> None:
-        with self._conn() as conn:
+        with self.transaction() as conn:
             row = conn.execute(
                 "SELECT total_falcons, used_falcons, remaining_falcons FROM protein_expressed WHERE id = ?",
                 (record_id,),
@@ -336,7 +458,7 @@ class ProteinRepository:
             )
 
     def consume_purified(self, record_id: int, quantity: int, reason: str | None = None) -> None:
-        with self._conn() as conn:
+        with self.transaction() as conn:
             row = conn.execute(
                 "SELECT total_aliquots, used_aliquots, remaining_aliquots FROM protein_purified WHERE id = ?",
                 (record_id,),
@@ -374,7 +496,7 @@ class ProteinRepository:
             )
 
     def list_usage_history(self, owner_table: str, owner_id: int):
-        with self._conn() as conn:
+        with self.transaction() as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM protein_usage_history
@@ -389,7 +511,7 @@ class ProteinRepository:
         """Return protein usage events, enriched with the protein identity."""
         pattern = f"%{text.strip()}%"
 
-        with self._conn() as conn:
+        with self.transaction() as conn:
             rows = conn.execute(
                 """
                 SELECT

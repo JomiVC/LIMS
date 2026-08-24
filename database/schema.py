@@ -298,7 +298,7 @@ def create_protein_purified_table(conn: Connection) -> None:
 
 
 def ensure_protein_consumption_columns(conn: Connection) -> None:
-    """Ensure older databases gain the stock consumption columns."""
+    """Ensure older databases gain the stock consumption and traceability columns."""
     tables = {
         "protein_expressed": (
             ("used_falcons", "INTEGER NOT NULL DEFAULT 0"),
@@ -307,6 +307,8 @@ def ensure_protein_consumption_columns(conn: Connection) -> None:
         "protein_purified": (
             ("used_aliquots", "INTEGER NOT NULL DEFAULT 0"),
             ("remaining_aliquots", "INTEGER NOT NULL DEFAULT 0"),
+            ("source_expression_id", "INTEGER REFERENCES protein_expressed(id) ON DELETE RESTRICT"),
+            ("source_purification_id", "INTEGER REFERENCES protein_purified(id) ON DELETE RESTRICT"),
         ),
     }
 

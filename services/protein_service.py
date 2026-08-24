@@ -55,6 +55,17 @@ class ProteinService:
     def search_usage_history(self, text: str = ""):
         return self.repository.search_usage_history(text)
 
+    def list_available_expressed(self):
+        """Returns expressed proteins with remaining_falcons > 0."""
+        all_exp = self.repository.list_expressed()
+        return [e for e in all_exp if e.remaining_falcons > 0]
+
+    def get_purifications_for_expression(self, expression_id: int):
+        return self.repository.get_purifications_for_expression(expression_id)
+
+    def get_source_expression_for_purification(self, purification_id: int):
+        return self.repository.get_source_expression_for_purification(purification_id)
+
     # =====================================================
     # ATTACHMENTS
     # =====================================================
@@ -265,13 +276,101 @@ class ProteinService:
 
         return record_id, sample_id
 
+    def register_purification_from_expression(
+        self,
+        *,
+        source_expression_id: int,
+        falcons_used: int,
+        concentration_um: float | None,
+        volume_ul: float | None,
+        buffer: str,
+        date_stored: str,
+        notebook_ref: str,
+        total_aliquots: int,
+        notes: str = "",
+        box_id: int,
+        start_position: str,
+        uploaded_files=None,
+    ):
+        """
+        ATOMIC transaction to register a purified protein derived from an expressed protein.
+        - Validates storage availability FIRST before starting database inserts.
+        - Uses public repository.transaction() context manager.
+        - Validates source expression and remaining_falcons stock.
+        - Inherits protein_name, construct, variant, media, and batch_no.
+        - Deducts falcons, creates purification, inserts containers and attachments.
+        - Rolls back automatically on any error.
+        """
+        if not source_expression_id:
+            raise ValueError("A source expressed protein must be selected.")
+
+        if falcons_used < 1:
+            raise ValueError("Falcons used must be at least 1.")
+
+        if total_aliquots < 1:
+            raise ValueError("Number of aliquots must be at least 1.")
+
+        box = self.storage_service.get_box(box_id)
+        if box.box_type != "EPPENDORF":
+            raise ValueError("Purified proteins can only be stored in EPPENDORF boxes.")
+
+        # 1. Validar disponibilidad de espacio en Storage antes de modificar la base de datos
+        run = self.find_consecutive_run(box_id, start_position, total_aliquots)
+
+        # 2. Transacción atómica usando el método público repository.transaction()
+        with self.repository.transaction() as conn:
+            source_exp = self.repository.get_expressed(source_expression_id, conn=conn)
+            if not source_exp:
+                raise ValueError(f"Expressed protein #{source_expression_id} not found.")
+
+            if source_exp.remaining_falcons < falcons_used:
+                raise ValueError(
+                    f"Cannot use {falcons_used} Falcon(s). "
+                    f"Only {source_exp.remaining_falcons} available in {source_exp.sample_id}."
+                )
+
+            # Crear purificación heredando atributos del origen
+            record_id, sample_id = self.repository.create_purified_from_expression(
+                conn,
+                source_expression_id=source_expression_id,
+                protein_name=source_exp.protein_name,
+                construct=source_exp.construct or "",
+                variant=source_exp.variant or "",
+                media=source_exp.media or "",
+                batch_no=source_exp.batch_no or "",
+                concentration_um=concentration_um,
+                volume_ul=volume_ul,
+                buffer=buffer,
+                date_stored=date_stored,
+                notebook_ref=notebook_ref,
+                total_aliquots=total_aliquots,
+                notes=notes,
+            )
+
+            # Descontar Falcons de la expresión e insertar evento en protein_usage_history
+            self.repository.deduct_expression_falcons(
+                conn, source_expression_id, falcons_used, sample_id
+            )
+
+            # Crear contenedores dentro de la misma transacción
+            self._create_containers(
+                box_id, run, "PROTEIN_PURIFIED", record_id, sample_id, conn=conn
+            )
+
+            # Guardar archivos adjuntos si existen
+            self._save_attachments(
+                "protein_purified", record_id, uploaded_files
+            )
+
+        return record_id, sample_id
+
     # =====================================================
     # INTERNAL HELPERS
     # =====================================================
 
     def _create_containers(
         self, box_id, position_labels, container_type, item_id,
-        sample_id
+        sample_id, conn=None
     ):
 
         for i, position_label in enumerate(position_labels, start=1):
@@ -286,6 +385,7 @@ class ProteinService:
                 item_id=item_id,
                 label=f"{sample_id}-{i}",
                 notes="",
+                conn=conn,
             )
 
     def _save_attachments(self, owner_table, owner_id, uploaded_files):

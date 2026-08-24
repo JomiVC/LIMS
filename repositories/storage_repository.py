@@ -18,6 +18,7 @@ Changes vs previous version:
 """
 
 import sqlite3
+from typing import Optional, Any
 from contextlib import contextmanager
 
 from database.connection import get_connection
@@ -748,7 +749,8 @@ class StorageRepository:
         container_type: str,
         item_id: int,
         label: str,
-        notes: str = ""
+        notes: str = "",
+        conn: Optional[Any] = None,
     ) -> int:
         """
         Creates a container at `position_id` holding the item
@@ -769,9 +771,8 @@ class StorageRepository:
 
         column, item_table = self._ITEM_LINK_COLUMNS[container_type]
 
-        with self._conn() as conn:
-
-            occupied = conn.execute(
+        def _execute(c):
+            occupied = c.execute(
                 "SELECT 1 FROM storage_containers WHERE position_id = ?",
                 (position_id,)
             ).fetchone()
@@ -781,7 +782,7 @@ class StorageRepository:
                     f"Position {position_id} is already occupied."
                 )
 
-            item_exists = conn.execute(
+            item_exists = c.execute(
                 f"SELECT 1 FROM {item_table} WHERE id = ?",
                 (item_id,)
             ).fetchone()
@@ -792,7 +793,7 @@ class StorageRepository:
                     f"exist in {item_table}."
                 )
 
-            cursor = conn.execute(
+            cursor = c.execute(
                 f"""
                 INSERT INTO storage_containers
                 (
@@ -819,8 +820,13 @@ class StorageRepository:
                     notes
                 )
             )
-
             return cursor.lastrowid
+
+        if conn is not None:
+            return _execute(conn)
+
+        with self._conn() as conn_obj:
+            return _execute(conn_obj)
 
     def get_container(self, container_id: int) -> Container | None:
 
@@ -833,11 +839,16 @@ class StorageRepository:
 
         return Container.from_row(row) if row else None
 
-    def get_container_by_label(self, label: str) -> Container | None:
-
-        with self._conn() as conn:
-
+    def get_container_by_label(self, label: str, conn: Optional[Any] = None) -> Container | None:
+        if conn is not None:
             row = conn.execute(
+                "SELECT * FROM storage_containers WHERE label = ?",
+                (label,)
+            ).fetchone()
+            return Container.from_row(row) if row else None
+
+        with self._conn() as conn_obj:
+            row = conn_obj.execute(
                 "SELECT * FROM storage_containers WHERE label = ?",
                 (label,)
             ).fetchone()

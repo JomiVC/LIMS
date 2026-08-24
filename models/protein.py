@@ -81,6 +81,8 @@ class ProteinPurified:
     total_aliquots: int
     used_aliquots: int = 0
     remaining_aliquots: int = 0
+    source_expression_id: Optional[int] = None
+    source_purification_id: Optional[int] = None
     notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
@@ -89,6 +91,8 @@ class ProteinPurified:
     def from_row(cls, row: sqlite3.Row) -> "ProteinPurified":
         used_aliquots = row["used_aliquots"] if "used_aliquots" in row.keys() else 0
         remaining_aliquots = row["remaining_aliquots"] if "remaining_aliquots" in row.keys() else max(row["total_aliquots"] - used_aliquots, 0)
+        source_exp_id = row["source_expression_id"] if "source_expression_id" in row.keys() else None
+        source_purif_id = row["source_purification_id"] if "source_purification_id" in row.keys() else None
 
         return cls(
             id=row["id"],
@@ -106,6 +110,8 @@ class ProteinPurified:
             total_aliquots=row["total_aliquots"],
             used_aliquots=used_aliquots,
             remaining_aliquots=remaining_aliquots,
+            source_expression_id=source_exp_id,
+            source_purification_id=source_purif_id,
             notes=row["notes"],
             created_at=_parse_dt(row["created_at"]),
             updated_at=_parse_dt(row["updated_at"]),

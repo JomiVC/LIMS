@@ -30,6 +30,7 @@ from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from services.protein_service import ProteinService
 from ui.attachments import render_attachments
 from ui.box_grid import render_box_grid
+from ui.use_aliquot import render_use_aliquot_form
 from ui.rack_grid import (
     render_rack_grid,
     get_rack_slot_combos,
@@ -66,7 +67,7 @@ def _protein_table_row(container_type, protein_record, location_text):
             "Variant": protein_record.variant or "—",
             "Media": protein_record.media or "—",
             "Batch": protein_record.batch_no or "—",
-            "Bolume/Falcon (L)": protein_record.volume_per_falcon_l or "—",
+            "Volume/Falcon (L)": protein_record.volume_per_falcon_l or "—",
             "Buffer": protein_record.buffer or "—",
             "Date Stored": protein_record.date_stored or "—",
             "Notebook Ref": protein_record.notebook_ref or "—",
@@ -161,20 +162,15 @@ def _display_storage_record_actions(record, container_type):
         total = record.total_falcons if owner_table == "protein_expressed" else record.total_aliquots
         used = record.used_falcons if owner_table == "protein_expressed" else record.used_aliquots
 
-        qty = st.number_input(
-            "Qty to use",
-            min_value=1,
-            max_value=remaining if remaining > 0 else 1,
-            step=1,
-            value=1,
-            key=f"storage_row_use_qty_{container_type}_{record.id}",
-        )
-        if st.button("Confirm use", key=f"storage_row_use_btn_{container_type}_{record.id}"):
+        key_pfx = f"storage_row_{container_type}_{record.id}"
+        qty, reason_text, is_confirmed = render_use_aliquot_form(key_pfx, remaining)
+
+        if is_confirmed:
             try:
                 if owner_table == "protein_expressed":
-                    protein_service.consume_expressed(record.id, int(qty), reason="manual use")
+                    protein_service.consume_expressed(record.id, int(qty), reason=reason_text)
                 else:
-                    protein_service.consume_purified(record.id, int(qty), reason="manual use")
+                    protein_service.consume_purified(record.id, int(qty), reason=reason_text)
                 st.success(f"✅ {qty} aliquot(s) used.")
                 st.rerun()
             except ValueError as e:
@@ -218,23 +214,6 @@ def _show_container_details(container_details):
             key_prefix=f"storage_container_{container_details['container_id']}",
         )
         return
-        if container_details['attachments']:
-            st.divider()
-            st.markdown("**📎 Attachments:**")
-            for att in container_details['attachments']:
-                file_path = BASE_DIR / att["file_path"]
-                if file_path.exists():
-                    with open(file_path, "rb") as f:
-                        st.download_button(
-                            label=f"📥 {att['file_name']}",
-                            data=f.read(),
-                            file_name=att['file_name'],
-                            key=f"download_att_{att['id']}"
-                        )
-                else:
-                    st.caption(f"⚠️ {att['file_name']} (file not found at {file_path})")
-        else:
-            st.caption("No attachments for this sample.")
 
     elif action == "Use aliquot" and container_details["container_type"] in {"PROTEIN_EXPRESSED", "PROTEIN_PURIFIED"}:
         item_id = container_details.get("item_id")
@@ -246,20 +225,15 @@ def _show_container_details(container_details):
                 total = item_record.total_falcons if owner_table == "protein_expressed" else item_record.total_aliquots
                 used = item_record.used_falcons if owner_table == "protein_expressed" else item_record.used_aliquots
 
-                qty = st.number_input(
-                    "Qty to use",
-                    min_value=1,
-                    max_value=remaining if remaining > 0 else 1,
-                    step=1,
-                    value=1,
-                    key=f"storage_use_{container_details['container_id']}",
-                )
-                if st.button("Confirm use", key=f"storage_use_btn_{container_details['container_id']}"):
+                key_pfx = f"storage_use_{container_details['container_id']}"
+                qty, reason_text, is_confirmed = render_use_aliquot_form(key_pfx, remaining)
+
+                if is_confirmed:
                     try:
                         if owner_table == "protein_expressed":
-                            protein_service.consume_expressed(item_id, int(qty), reason="manual use")
+                            protein_service.consume_expressed(item_id, int(qty), reason=reason_text)
                         else:
-                            protein_service.consume_purified(item_id, int(qty), reason="manual use")
+                            protein_service.consume_purified(item_id, int(qty), reason=reason_text)
                         st.success(f"✅ {qty} aliquot(s) used.")
                         st.rerun()
                     except ValueError as e:
@@ -426,7 +400,7 @@ with tab_samples:
                     "Variant": "—",
                     "Media": "—",
                     "Batch": "—",
-                    "Bolume/Falcon (L)": "—",
+                    "Volume/Falcon (L)": "—",
                     "Conc. (µM)": "—",
                     "Vol. (µL)": "—",
                     "Buffer": "—",
