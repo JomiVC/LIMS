@@ -188,7 +188,9 @@ def _show_container_details(container_details):
     Display detailed info about a container and its attachments.
     (Shown inline within the box dialog, not in a nested modal)
     """
-    st.subheader(f"📋 Sample: {container_details['label']}")
+    tooltip_label = container_details.get("tooltip_label")
+    header_text = tooltip_label if tooltip_label else container_details['label']
+    st.subheader(f"📋 {header_text}")
 
     if container_details['item_details']:
         row = {
@@ -273,11 +275,14 @@ def _show_container_details(container_details):
                         st.write(f"• {event['used_at'][:19]} — {event['quantity']} used ({event['reason']})")
 
 
-def show_box_dialog(box, all_racks):
+def show_box_dialog(box):
     """
-    Opens the box's grid (plus notes, position counts, edit and
-    delete) as a modal dialog that overlays the rack grid, instead
-    of rendering inline below it.
+    Opens the box's grid (plus notes and position counts) as a
+    read-only modal dialog that overlays the rack grid, instead of
+    rendering inline below it.
+
+    Read-only by design: editing or deleting a box is done exclusively
+    from "New equipment > Edit Equipment", not from Browse.
     """
 
     @st.dialog(f"Box: {box.box_name}", width="large")
@@ -331,112 +336,6 @@ def show_box_dialog(box, all_racks):
             _show_container_details(selected_container)
             # Clear the selection so it doesn't reopen
             st.session_state.pop("browse_selected_container", None)
-
-        st.divider()
-
-        edit_tab, delete_tab = st.tabs(["✏️ Edit", "🗑️ Delete"])
-
-        # --- EDIT ---
-        with edit_tab:
-
-            all_rack_options = {r.id: r.rack_name for r in all_racks}
-
-            with st.form(f"edit_box_{box.id}"):
-
-                new_rack_id = st.selectbox(
-                    "Rack",
-                    options=list(all_rack_options.keys()),
-                    format_func=lambda rid: all_rack_options[rid],
-                    index=list(all_rack_options.keys())
-                        .index(box.rack_id)
-                        if box.rack_id in all_rack_options
-                        else 0,
-                    key=f"edit_rack_{box.id}",
-                )
-
-                edit_config = storage_service.get_rack_configuration(
-                    new_rack_id
-                )
-
-                if edit_config["has_shelf"]:
-                    new_shelf = st.selectbox(
-                        "Shelf",
-                        options=edit_config["shelves"],
-                        index=edit_config["shelves"]
-                            .index(box.shelf)
-                            if box.shelf in edit_config["shelves"]
-                            else 0,
-                        key=f"edit_shelf_{box.id}",
-                    )
-                else:
-                    new_shelf = None
-
-                new_slot = st.selectbox(
-                    "Slot",
-                    options=edit_config["slots"],
-                    index=edit_config["slots"].index(box.slot)
-                        if box.slot in edit_config["slots"]
-                        else 0,
-                    key=f"edit_slot_{box.id}",
-                )
-
-                new_owner = st.text_input(
-                    "Owner",
-                    value=box.owner or "",
-                    key=f"edit_owner_{box.id}",
-                )
-
-                new_notes = st.text_area(
-                    "Notes",
-                    value=box.notes or "",
-                    key=f"edit_notes_{box.id}",
-                )
-
-                save = st.form_submit_button("Save changes")
-
-                if save:
-                    try:
-                        storage_service.update_box(
-                            box_id=box.id,
-                            rack_id=new_rack_id,
-                            shelf=new_shelf,
-                            slot=new_slot,
-                            owner=new_owner,
-                            notes=new_notes,
-                        )
-                    except ValueError as e:
-                        st.error(str(e))
-                    else:
-                        st.success("Box updated.")
-                        clear_active_selection("browse")
-                        st.rerun()
-
-        # --- DELETE ---
-        with delete_tab:
-
-            st.warning(
-                "A box can only be deleted if all of its "
-                "positions are free."
-            )
-
-            confirm = st.checkbox(
-                f"I confirm I want to delete '{box.box_name}'",
-                key=f"confirm_delete_{box.id}",
-            )
-
-            if st.button(
-                "Delete box",
-                key=f"delete_{box.id}",
-                disabled=not confirm,
-            ):
-                try:
-                    storage_service.delete_box(box.id)
-                except ValueError as e:
-                    st.error(str(e))
-                else:
-                    st.success(f"Box '{box.box_name}' deleted.")
-                    clear_active_selection("browse")
-                    st.rerun()
 
     _dialog()
     clear_active_selection("browse")
@@ -647,7 +546,7 @@ with tab_boxes:
                     )
 
                 else:
-                    show_box_dialog(box, all_racks)
+                    show_box_dialog(box)
 
 
     # ------------------------------------------------------
