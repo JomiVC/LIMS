@@ -343,64 +343,19 @@ class StorageService:
     # CONTAINER DETAILS (enriched with item info)
     # =====================================================
 
-    # Field labels shared by both protein sub-types (expressed and
-    # purified) in get_container_details. Kept in one place so the
-    # display labels aren't duplicated across two near-identical
-    # branches.
-    _PROTEIN_CONTAINER_CONFIG = {
-        "PROTEIN_EXPRESSED": {
-            "getter": "get_expressed",
-            "extra_before_buffer": lambda item: {
-                "📊 Vol/Falcon (L)": item.volume_per_falcon_l or "—",
-            },
-            "extra_after_notebook": lambda item: {
-                "🔢 Total Falcons": item.total_falcons,
-            },
-        },
-        "PROTEIN_PURIFIED": {
-            "getter": "get_purified",
-            "extra_before_buffer": lambda item: {
-                "📐 Concentration (µM)": item.concentration_um or "—",
-                "💧 Volume (µL)": item.volume_ul or "—",
-            },
-            "extra_after_notebook": lambda item: {
-                "🔢 Total Aliquots": item.total_aliquots,
-            },
-        },
-    }
-
-    def _build_protein_item_details(self, container_type, item):
-        """
-        Builds the item_details dict for a PROTEIN_EXPRESSED or
-        PROTEIN_PURIFIED container: fields common to both sub-types,
-        plus the sub-type-specific fields inserted at the same spots
-        the UI previously showed them (see _PROTEIN_CONTAINER_CONFIG).
-        """
-
-        config = self._PROTEIN_CONTAINER_CONFIG[container_type]
-
-        return {
-            "🔖 Sample ID": item.sample_id,
-            "🧬 Protein": item.protein_name,
-            "🔨 Construct": item.construct or "—",
-            "🔄 Variant": item.variant or "—",
-            "🥛 Media": item.media or "—",
-            "📦 Batch": item.batch_no or "—",
-            **config["extra_before_buffer"](item),
-            "🧪 Buffer": item.buffer or "—",
-            "📅 Date Stored": item.date_stored or "—",
-            "📔 Notebook Ref": item.notebook_ref or "—",
-            **config["extra_after_notebook"](item),
-            "📝 Notes": item.notes or "—",
-        }
-
     def get_container_details(self, container_id):
         """
         Returns enriched container info including item name and
         attachments. Useful for displaying in UI modals.
+
+        Item-specific rendering (e.g. for PROTEIN_EXPRESSED /
+        PROTEIN_PURIFIED) is delegated to whatever provider the
+        owning module registered in container_detail_registry --
+        StorageService itself has no knowledge of Protein, DNA, or
+        Reagents specifics.
         """
-        from repositories.protein_repository import ProteinRepository
-        
+        from services.container_detail_registry import get_provider
+
         container = self.get_container(container_id)
         
         if not container:
@@ -431,20 +386,17 @@ class StorageService:
             
             if item_id:
                 details["item_id"] = item_id
-                
-                if container.container_type in self._PROTEIN_CONTAINER_CONFIG:
-                    config = self._PROTEIN_CONTAINER_CONFIG[
-                        container.container_type
-                    ]
-                    repo = ProteinRepository()
-                    item = getattr(repo, config["getter"])(item_id)
-                    details["item_name"] = item.protein_name if item else None
-                    details["item_details"] = (
-                        self._build_protein_item_details(
-                            container.container_type, item
-                        ) if item else {}
-                    )
-                
+
+                provider = get_provider(container.container_type)
+
+                if provider:
+                    result = provider.get_details(item_id)
+
+                    if result:
+                        details["item_name"], details["item_details"] = (
+                            result
+                        )
+
                 # Get attachments
                 attachments = self.attachment_repository.list_for(
                     table_name, item_id
