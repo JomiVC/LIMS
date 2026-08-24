@@ -28,6 +28,7 @@ from config import BASE_DIR
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from services.protein_service import ProteinService
+from services.protein_container_detail_provider import format_sample_label
 from ui.attachments import render_attachments
 from ui.box_grid import render_box_grid
 from ui.rack_grid import (
@@ -165,12 +166,39 @@ def _display_storage_record_actions(record, container_type):
         st.caption(f"Total: {total} | Used: {used} | Remaining: {remaining}")
 
 
+def _container_header_label(container_details):
+    """
+    Returns the header text for a container's detail panel.
+
+    For protein containers, this is the same enriched identifier
+    used in pages/proteins.py (Sample ID | Protein | Construct |
+    Variant | Media), via the shared format_sample_label(). For any
+    other container type (DNA, reagent lots, ...), falls back to the
+    container's own label, since that format is protein-specific.
+    """
+
+    container_type = container_details["container_type"]
+    item_id = container_details.get("item_id")
+
+    if item_id and container_type == "PROTEIN_EXPRESSED":
+        record = protein_service.repository.get_expressed(item_id)
+        if record:
+            return format_sample_label(record)
+
+    elif item_id and container_type == "PROTEIN_PURIFIED":
+        record = protein_service.repository.get_purified(item_id)
+        if record:
+            return format_sample_label(record)
+
+    return container_details["label"]
+
+
 def _show_container_details(container_details):
     """
     Display detailed info about a container and its attachments.
     (Shown inline within the box dialog, not in a nested modal)
     """
-    st.subheader(f"📋 Sample: {container_details['label']}")
+    st.subheader(f"📋 {_container_header_label(container_details)}")
 
     if container_details['item_details']:
         row = {
