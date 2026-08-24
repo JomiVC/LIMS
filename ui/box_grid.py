@@ -105,12 +105,19 @@ def render_box_grid(box, occupied_positions, selectable=False, key_prefix="", en
                     label = item.get("label") or "Occupied"
                     container_id = item.get("container_id")
                     
-                    # Build help text with item name if available
+                    # Build help text: prefer the formatted sample tooltip
+                    # (Sample ID | Protein Name | Construct | Variant | Media)
+                    # supplied by the caller; fall back to item_name for
+                    # non-protein containers, then to the raw label.
                     help_text = f"{position} — {label}"
                     if enriched_data and container_id in enriched_map:
                         enriched = enriched_map[container_id]
-                        item_name = enriched.get("item_name", "Unknown")
-                        help_text = f"{position} — {label}\n({item_name})"
+                        tooltip_label = enriched.get("tooltip_label")
+                        if tooltip_label:
+                            help_text = f"{position}\n{tooltip_label}"
+                        else:
+                            item_name = enriched.get("item_name") or "Unknown"
+                            help_text = f"{position} — {label}\n({item_name})"
 
                     clicked = st.button(
                         f"🔵 {position}",

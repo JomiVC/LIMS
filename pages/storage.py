@@ -28,7 +28,6 @@ from config import BASE_DIR
 from services.storage_service import StorageService
 from services.item_service import ItemService, CONTAINER_TYPE_LABELS
 from services.protein_service import ProteinService
-from services.protein_container_detail_provider import format_sample_label
 from ui.attachments import render_attachments
 from ui.box_grid import render_box_grid
 from ui.rack_grid import (
@@ -100,6 +99,24 @@ def _protein_table_row(container_type, protein_record, location_text):
     return row
 
 
+def _format_sample_tooltip(record):
+    """
+    Build the compact tooltip label shown on hover over an occupied
+    grid position.
+
+    Format: Sample ID | Protein Name | Construct | Variant | Media
+    Any missing (None or empty) field is rendered as "-".
+    """
+    fields = [
+        record.sample_id,
+        record.protein_name,
+        record.construct,
+        record.variant,
+        record.media,
+    ]
+    return " | ".join(field if field else "-" for field in fields)
+
+
 def _display_storage_record_actions(record, container_type):
     """Show the same two actions for a selected storage row: attachments or aliquot use."""
     action = st.radio(
@@ -166,39 +183,12 @@ def _display_storage_record_actions(record, container_type):
         st.caption(f"Total: {total} | Used: {used} | Remaining: {remaining}")
 
 
-def _container_header_label(container_details):
-    """
-    Returns the header text for a container's detail panel.
-
-    For protein containers, this is the same enriched identifier
-    used in pages/proteins.py (Sample ID | Protein | Construct |
-    Variant | Media), via the shared format_sample_label(). For any
-    other container type (DNA, reagent lots, ...), falls back to the
-    container's own label, since that format is protein-specific.
-    """
-
-    container_type = container_details["container_type"]
-    item_id = container_details.get("item_id")
-
-    if item_id and container_type == "PROTEIN_EXPRESSED":
-        record = protein_service.repository.get_expressed(item_id)
-        if record:
-            return format_sample_label(record)
-
-    elif item_id and container_type == "PROTEIN_PURIFIED":
-        record = protein_service.repository.get_purified(item_id)
-        if record:
-            return format_sample_label(record)
-
-    return container_details["label"]
-
-
 def _show_container_details(container_details):
     """
     Display detailed info about a container and its attachments.
     (Shown inline within the box dialog, not in a nested modal)
     """
-    st.subheader(f"📋 {_container_header_label(container_details)}")
+    st.subheader(f"📋 Sample: {container_details['label']}")
 
     if container_details['item_details']:
         row = {
@@ -316,6 +306,18 @@ def show_box_dialog(box, all_racks):
             if container_id:
                 details = storage_service.get_container_details(container_id)
                 if details:
+                    if details.get("container_type") in {"PROTEIN_EXPRESSED", "PROTEIN_PURIFIED"}:
+                        item_id = details.get("item_id")
+                        record = None
+                        if item_id:
+                            record = (
+                                protein_service.repository.get_expressed(item_id)
+                                if details["container_type"] == "PROTEIN_EXPRESSED"
+                                else protein_service.repository.get_purified(item_id)
+                            )
+                        details["tooltip_label"] = (
+                            _format_sample_tooltip(record) if record else "-"
+                        )
                     enriched_data.append(details)
 
         render_box_grid(box, occupied, key_prefix="browse", enriched_data=enriched_data)
