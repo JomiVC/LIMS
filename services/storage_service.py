@@ -199,7 +199,11 @@ class StorageService:
             raise ValueError("Invalid slot.")
 
         try:
-            box_id = self.repository.create_box(
+            # Box + positions are created in a single SQLite
+            # transaction (see StorageRepository.create_box_with_positions):
+            # either both are committed or neither is, so there's no
+            # window where a box exists without its positions.
+            box_id = self.repository.create_box_with_positions(
                 box_name=box_name,
                 box_type=box_type,
                 owner=owner,
@@ -210,19 +214,6 @@ class StorageService:
             )
         except StorageError as e:
             raise ValueError(str(e)) from e
-
-        try:
-            self.repository.create_positions(box_id, box_type)
-
-        except StorageError as e:
-            # Positions failed to create after the box succeeded --
-            # remove the orphaned box rather than leaving a box with
-            # no positions (each repository call is its own
-            # transaction, so this isn't rolled back automatically).
-            self.repository.delete_box(box_id)
-            raise ValueError(
-                f"Failed to create positions, box was rolled back: {e}"
-            ) from e
 
         return box_id
 

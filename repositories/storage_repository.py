@@ -339,6 +339,114 @@ class StorageRepository:
 
             return cursor.lastrowid
 
+    @staticmethod
+    def _position_names_for_box_type(box_type: str) -> list[str]:
+        """
+        Returns the ordered list of position names (e.g. 'A1', 'A2', ...)
+        for a given box type. Shared by create_positions and
+        create_box_with_positions so the grid layout is defined once.
+        """
+
+        if box_type.upper() == "EPPENDORF":
+            rows, cols = "ABCDEFGH", range(1, 9)
+
+        elif box_type.upper() == "FALCON":
+            rows, cols = "ABCD", range(1, 5)
+
+        elif box_type.upper() == "FALCON_15":
+            rows, cols = "ABCDEFG", range(1, 8)
+
+        else:
+            raise ValueError(f"Unknown box type: {box_type}")
+
+        return [f"{row}{col}" for row in rows for col in cols]
+
+    def create_box_with_positions(
+        self,
+        box_name: str,
+        box_type: str,
+        owner: str,
+        rack_id: int,
+        shelf: int,
+        slot: int,
+        notes: str = ""
+    ) -> int:
+        """
+        Creates a box and its positions atomically, in a single
+        SQLite transaction: either both succeed and commit together,
+        or an exception rolls back both (no orphaned box, no box
+        left without positions -- important under WAL with several
+        concurrent users, where another connection could otherwise
+        briefly observe a box row with no positions yet).
+
+        Runs the same validations as create_box (rack exists, no
+        duplicate name, slot free) before inserting.
+        """
+
+        with self._conn() as conn:
+
+            if not self._rack_exists(conn, rack_id):
+                raise RackNotFoundError(
+                    f"Rack {rack_id} does not exist."
+                )
+
+            existing = conn.execute(
+                "SELECT 1 FROM storage_boxes WHERE box_name = ?",
+                (box_name,)
+            ).fetchone()
+
+            if existing:
+                raise DuplicateBoxNameError(
+                    f"A box named '{box_name}' already exists."
+                )
+
+            if self._slot_occupied(conn, rack_id, shelf, slot):
+                raise SlotOccupiedError(
+                    f"Slot {slot}"
+                    f"{f' ({shelf})' if shelf else ''} in this rack "
+                    f"is already occupied by another box."
+                )
+
+            position_names = self._position_names_for_box_type(box_type)
+
+            cursor = conn.execute(
+                """
+                INSERT INTO storage_boxes
+                (
+                    box_name,
+                    box_type,
+                    owner,
+                    rack_id,
+                    shelf,
+                    slot,
+                    notes
+                )
+                VALUES
+                (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    box_name,
+                    box_type,
+                    owner,
+                    rack_id,
+                    shelf,
+                    slot,
+                    notes
+                )
+            )
+
+            box_id = cursor.lastrowid
+
+            conn.executemany(
+                """
+                INSERT INTO storage_positions (box_id, position)
+                VALUES (?, ?)
+                """,
+                [(box_id, name) for name in position_names]
+            )
+
+            return box_id
+
     def update_box(
         self,
         box_id: int,
@@ -512,23 +620,9 @@ class StorageRepository:
                     f"Box {box_id} already has positions created."
                 )
 
-            if box_type.upper() == "EPPENDORF":
-                rows, cols = "ABCDEFGH", range(1, 9)
+            position_names = self._position_names_for_box_type(box_type)
 
-            elif box_type.upper() == "FALCON":
-                rows, cols = "ABCD", range(1, 5)
-
-            elif box_type.upper() == "FALCON_15":
-                rows, cols = "ABCDEFG", range(1, 8)
-
-            else:
-                raise ValueError(f"Unknown box type: {box_type}")
-
-            positions = [
-                (box_id, f"{row}{col}")
-                for row in rows
-                for col in cols
-            ]
+            positions = [(box_id, name) for name in position_names]
 
             conn.executemany(
                 """
