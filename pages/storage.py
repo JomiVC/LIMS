@@ -235,6 +235,10 @@ def _show_container_details(container_details):
                         else:
                             protein_service.consume_purified(item_id, int(qty), reason=reason_text)
                         st.success(f"✅ {qty} aliquot(s) used.")
+                        # Clear the selection NOW, before the rerun, so the
+                        # next render shows the grid with the freed position
+                        # and does not re-open the detail panel.
+                        st.session_state.pop("browse_selected_container", None)
                         st.rerun()
                     except ValueError as e:
                         st.error(str(e))
@@ -306,10 +310,12 @@ def show_box_dialog(box):
         
         if selected_container:
             st.divider()
-            # Show the detail section inline within the dialog
+            # Keep browse_selected_container alive across reruns so that
+            # widget interactions inside _show_container_details (radio,
+            # number input, text input, confirm button) do not lose context.
+            # The key is cleared only after a successful consumption (see
+            # _show_container_details) or when the page is navigated away.
             _show_container_details(selected_container)
-            # Clear the selection so it doesn't reopen
-            st.session_state.pop("browse_selected_container", None)
 
     _dialog()
     clear_active_selection("browse")
