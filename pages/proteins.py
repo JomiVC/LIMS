@@ -108,13 +108,28 @@ def _protein_row_dict(record, is_expressed=True, location_text="—"):
     return row
 
 
-def _display_selected_protein_actions(record, is_expressed=True):
-    """Show only two actions for a selected row: attachments or consume aliquot."""
+def _display_selected_protein_actions(record, is_expressed=True, key_prefix=""):
+    """
+    Show only two actions for a selected row: attachments or
+    consume aliquot.
+
+    `key_prefix` scopes every widget key to the caller's table/tab
+    context (e.g. 'registro', 'expressed_table', 'purified_table').
+    Without it, the same record selected simultaneously in two
+    different tables (e.g. the global "Registro" tab and the
+    "Expressed proteins" tab -- both run on every rerun, since
+    st.tabs renders every tab's content regardless of which is
+    visible) produces the same key twice and Streamlit raises
+    StreamlitDuplicateElementKey.
+    """
+    scope = f"{key_prefix}_" if key_prefix else ""
+    suffix = f"{scope}{record.id}_{'exp' if is_expressed else 'pur'}"
+
     action = st.radio(
         "Action",
         options=["View attachments", "Use aliquot"],
         horizontal=True,
-        key=f"protein_action_{record.id}_{'exp' if is_expressed else 'pur'}",
+        key=f"protein_action_{suffix}",
     )
 
     if action == "View attachments":
@@ -132,9 +147,9 @@ def _display_selected_protein_actions(record, is_expressed=True):
             max_value=remaining if remaining > 0 else 1,
             step=1,
             value=1,
-            key=f"protein_use_qty_{record.id}_{'exp' if is_expressed else 'pur'}",
+            key=f"protein_use_qty_{suffix}",
         )
-        if st.button("Confirm use", key=f"protein_use_btn_{record.id}_{'exp' if is_expressed else 'pur'}"):
+        if st.button("Confirm use", key=f"protein_use_btn_{suffix}"):
             try:
                 if is_expressed:
                     protein_service.consume_expressed(record.id, int(qty), reason="manual use")
@@ -180,7 +195,9 @@ def _display_protein_selection_table(records, is_expressed, table_key):
         record = records[selected.selection.rows[0]]
         st.divider()
         st.subheader(f"{record.sample_id} â€” {record.protein_name}")
-        _display_selected_protein_actions(record, is_expressed=is_expressed)
+        _display_selected_protein_actions(
+            record, is_expressed=is_expressed, key_prefix=table_key
+        )
 
 
 def _display_protein_details(record, is_expressed=True):
@@ -328,7 +345,11 @@ with tab_registro:
                 record_tuple = records[idx]
                 st.divider()
                 st.subheader(f"{record_tuple[1].sample_id} — {record_tuple[1].protein_name}")
-                _display_selected_protein_actions(record_tuple[1], is_expressed=record_tuple[0])
+                _display_selected_protein_actions(
+                    record_tuple[1],
+                    is_expressed=record_tuple[0],
+                    key_prefix="registro",
+                )
 
 
 # ==========================================================
